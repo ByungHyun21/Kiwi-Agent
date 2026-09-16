@@ -420,6 +420,9 @@ func (m Model) popupView(width int) string {
 	if rowW < 20 {
 		rowW = 20
 	}
+	// popupStyle has PaddingLeft(1) and Width includes padding, so rows
+	// must stay one column narrower than rowW or the last char wraps
+	contentW := rowW - 1
 
 	// name column width from all candidates, not just the visible window
 	nameW := 0
@@ -435,7 +438,7 @@ func (m Model) popupView(width int) string {
 			name += " " + popupAliasStyle.Render("("+it.alias+")")
 		}
 		row := padRight(name, nameW) + it.desc
-		row = padRight(row, rowW)
+		row = truncate(padRight(row, contentW), contentW)
 		if idx == sel {
 			row = popupSelStyle.Render(row)
 		}

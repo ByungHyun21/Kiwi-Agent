@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 func sized(t *testing.T, w, h int) Model {
@@ -77,6 +78,20 @@ func TestTabCompletesSelectedCommand(t *testing.T) {
 	m4, _ := m3.Update(tea.KeyMsg{Type: tea.KeyTab})
 	if got := m4.(Model).msgIn.Value(); got != "/rename" {
 		t.Fatalf("Tab completed to %q, want /rename (selected item)", got)
+	}
+}
+
+func TestPopupRowsDoNotWrap(t *testing.T) {
+	m := sized(t, 100, 30)
+	m.msgIn.SetValue("/") // 19 commands -> full 8-row window
+	popup := m.popupView(100)
+	if h := lipgloss.Height(popup); h != popupMaxRows+2 {
+		t.Fatalf("popup height = %d, want %d (rows must not wrap)", h, popupMaxRows+2)
+	}
+	for i, line := range strings.Split(popup, "\n") {
+		if w := lipgloss.Width(line); w > 98 {
+			t.Fatalf("popup line %d width %d exceeds 98", i, w)
+		}
 	}
 }
 
