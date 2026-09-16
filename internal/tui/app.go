@@ -421,26 +421,30 @@ func (m Model) popupView(width int) string {
 		rowW = 20
 	}
 	// popupStyle has PaddingLeft(1) and Width includes padding, so rows
-	// must stay one column narrower than rowW or the last char wraps
 	contentW := rowW - 1
 
-	// name column width from all candidates, not just the visible window
+	// three columns: command, shortcut, description
 	nameW := 0
+	aliasW := 0
 	for _, it := range items {
-		nameW = max(nameW, lipgloss.Width(it.name)+4)
+		nameW = max(nameW, lipgloss.Width(it.name))
+		aliasW = max(aliasW, lipgloss.Width(it.alias))
 	}
+	nameW += 2
+	aliasW += 2
 
 	var rows []string
 	for i, it := range visible {
 		idx := start + i
-		name := it.name
-		if it.alias != "" {
-			name += " " + popupAliasStyle.Render("("+it.alias+")")
-		}
-		row := padRight(name, nameW) + it.desc
-		row = truncate(padRight(row, contentW), contentW)
+		var row string
 		if idx == sel {
-			row = popupSelStyle.Render(row)
+			// plain row only: nested ANSI resets would drop the background
+			row = padRight(it.name, nameW) + padRight(it.alias, aliasW) + it.desc
+			row = popupSelStyle.Render(truncate(padRight(row, contentW), contentW))
+		} else {
+			alias := popupAliasStyle.Render(padRight(it.alias, aliasW))
+			row = padRight(it.name, nameW) + alias + it.desc
+			row = truncate(padRight(row, contentW), contentW)
 		}
 		rows = append(rows, row)
 	}
