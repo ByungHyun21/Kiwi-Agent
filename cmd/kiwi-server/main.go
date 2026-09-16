@@ -5,11 +5,11 @@ import (
 	"log"
 	"net/http"
 
-	"kiwi-agent/internal/web"
+	"github.com/ByungHyun21/Kiwi-Agent/internal/web"
 )
 
 func main() {
-	addr := flag.String("addr", ":8080", "listen address")
+	addr := flag.String("addr", ":5494", "listen address")
 	flag.Parse()
 
 	log.Printf("kiwi-server listening on http://localhost%s", *addr)

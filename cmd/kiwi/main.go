@@ -6,7 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"kiwi-agent/internal/tui"
+	"github.com/ByungHyun21/Kiwi-Agent/internal/tui"
 )
 
 func main() {

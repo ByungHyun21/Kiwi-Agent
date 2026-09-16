@@ -1,4 +1,4 @@
-module kiwi-agent
+module github.com/ByungHyun21/Kiwi-Agent
 
 go 1.27.1
 

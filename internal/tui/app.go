@@ -64,7 +64,7 @@ type Model struct {
 // New returns the initial model, starting at the server-address screen.
 func New() Model {
 	a := textinput.New()
-	a.Placeholder = "192.168.0.10:8080"
+	a.Placeholder = "192.168.0.10:5494"
 	a.Prompt = "서버 > "
 	a.Focus()
 	a.CharLimit = 120
@@ -138,7 +138,7 @@ func (m Model) viewAddr() string {
 		titleStyle.Render("KIWI AGENT"),
 		"",
 		"서버 주소를 입력해 연결하세요.",
-		mutedStyle.Render("로컬망의 kiwi-server 주소 (예: 192.168.0.10:8080)"),
+		mutedStyle.Render("로컬망의 kiwi-server 주소 (예: 192.168.0.10:5494)"),
 		"",
 		m.addrIn.View(),
 		"",
