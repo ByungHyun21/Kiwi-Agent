@@ -15,6 +15,7 @@ import (
 var (
 	colorDeep  = lipgloss.Color("#3c5e20")
 	colorSoft  = lipgloss.Color("#6b7062")
+	colorLabel = lipgloss.Color("#a8c17a") // bright enough for dark terminals
 	colorLine  = lipgloss.Color("#c9c4b4")
 	colorAmber = lipgloss.Color("#a86a1f")
 
@@ -25,7 +26,7 @@ var (
 			Padding(0, 2)
 
 	hintStyle  = lipgloss.NewStyle().Foreground(colorSoft)
-	labelStyle = lipgloss.NewStyle().Foreground(colorSoft).Bold(true)
+	labelStyle = lipgloss.NewStyle().Foreground(colorLabel).Bold(true)
 	mutedStyle = lipgloss.NewStyle().Foreground(colorSoft)
 
 	popupStyle = lipgloss.NewStyle().
