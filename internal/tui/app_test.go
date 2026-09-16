@@ -63,6 +63,25 @@ func TestPopupScrollsToLaterCommands(t *testing.T) {
 	t.Fatal("scrolling did not bring /rename into view")
 }
 
+func TestCtrlCClearsInputWithoutQuitting(t *testing.T) {
+	m := sized(t, 100, 30)
+	m.msgIn.SetValue("긴 입력 중이던 내용")
+	m2, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	if cmd != nil {
+		t.Fatal("Ctrl+C must not quit")
+	}
+	if got := m2.(Model).msgIn.Value(); got != "" {
+		t.Fatalf("Ctrl+C left input = %q, want cleared", got)
+	}
+
+	mm := m2.(Model)
+	mm.msgIn.SetValue("/exit")
+	_, cmdExit := mm.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmdExit == nil {
+		t.Fatal("/exit no longer quits")
+	}
+}
+
 func TestCommandPopupFilters(t *testing.T) {
 	m := sized(t, 100, 30)
 	m.msgIn.SetValue("/re")

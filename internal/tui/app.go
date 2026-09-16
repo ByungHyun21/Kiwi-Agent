@@ -229,7 +229,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if msg.Type == tea.KeyCtrlC {
-			return m, tea.Quit
+			// clear the input line; quitting is /exit
+			m.msgIn.SetValue("")
+			m.notice = ""
+			return m, nil
 		}
 		if msg.Type == tea.KeyEsc {
 			// /stop surface behavior: consume quietly
