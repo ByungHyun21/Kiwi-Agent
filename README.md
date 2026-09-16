@@ -35,19 +35,6 @@ where your code lives, relayed by the server over SSH.
   cleaned, and indexed (full-text + vectors) so the agent can look things
   up while it works.
 
-## Status
-
-Early development. The surface is landing first; internals follow.
-
-| Area | State |
-|---|---|
-| Web UI (dashboard, machines, settings, docs) | scaffolded |
-| TUI client (address screen, main screen) | scaffolded |
-| Token auth, WebSocket protocol | planned |
-| SSH execution layer (`kiwi exec`) | planned |
-| Agent loop, sessions, projects | planned |
-| Document ingestion & search | planned (being designed against real use) |
-
 ## Install
 
 ### Agent (`kiwi`)
@@ -89,36 +76,7 @@ kiwi
 ```
 
 Inside the agent: `/project` to pick a project, `/new` to start a session,
-`/resume` to continue one, `/quit` to exit.
-
-## Security model
-
-Kiwi is designed for trusted local networks (LAN or a VPN such as
-Tailscale). The web UI and agent API are protected by a single bearer token;
-machine access uses the server's own SSH keys. It is not intended for
-exposure to the public internet.
-
-## Development
-
-Requires Go 1.27+ and [templ](https://templ.guide) (`go install
-github.com/a-h/templ/cmd/templ@latest`).
-
-```sh
-templ generate ./internal/web   # regen templated pages
-go build ./...                  # build everything
-go run ./cmd/kiwi-server        # run the server
-```
-
-```
-cmd/kiwi-server/    server binary
-cmd/kiwi/           agent TUI + kiwi exec subcommand
-internal/web/       templ + htmx web UI (embedded assets)
-internal/tui/       terminal client
-internal/protocol/  shared API types
-internal/agentcore/ LLM loop and tools
-internal/exec/      SSH connection pool and remote execution
-internal/ingest/    document pipeline
-```
+`/resume` to continue one, `/exit` to exit.
 
 ## License
 
