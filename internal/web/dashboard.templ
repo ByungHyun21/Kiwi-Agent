@@ -1,0 +1,28 @@
+package web
+
+templ Dashboard() {
+	@Layout("대시보드", "dashboard") {
+		<header class="page-head">
+			<h1>대시보드</h1>
+			<p class="page-desc">서버와 작업 기기, 세션 상태를 한눈에 확인합니다.</p>
+		</header>
+		<section class="stats">
+			@statCard("등록된 기기", "0")
+			@statCard("활성 세션", "0")
+			@statCard("색인된 문서", "0")
+		</section>
+		<section class="panel">
+			<div class="panel-head">
+				<h2>기기 상태</h2>
+				<a class="link" href="/machines">기기 관리 →</a>
+			</div>
+			@EmptyState("등록된 기기가 없습니다", "기기 페이지에서 SSH로 접속할 작업 PC를 등록하세요.")
+		</section>
+		<section class="panel">
+			<div class="panel-head">
+				<h2>최근 세션</h2>
+			</div>
+			@EmptyState("세션이 없습니다", "kiwi 에이전트에서 /project 로 프로젝트를 열면 세션이 생성됩니다.")
+		</section>
+	}
+}

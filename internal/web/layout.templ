@@ -1,0 +1,57 @@
+package web
+
+templ navItem(href string, label string, key string, active string) {
+	<a href={ templ.URL(href) } class={ "nav-item", templ.KV("is-active", active == key) }>{ label }</a>
+}
+
+templ EmptyState(title string, hint string) {
+	<div class="empty">
+		<div class="empty-mark"></div>
+		<p class="empty-title">{ title }</p>
+		if hint != "" {
+			<p class="empty-hint">{ hint }</p>
+		}
+	</div>
+}
+
+templ statCard(label string, value string) {
+	<div class="stat">
+		<span class="stat-value">{ value }</span>
+		<span class="stat-label">{ label }</span>
+	</div>
+}
+
+templ Layout(title string, active string) {
+	<!DOCTYPE html>
+	<html lang="ko">
+	<head>
+		<meta charset="utf-8"/>
+		<meta name="viewport" content="width=device-width, initial-scale=1"/>
+		<title>{ title } · Kiwi Server</title>
+		<link rel="stylesheet" href="/static/style.css"/>
+		<script src="/static/htmx.min.js"></script>
+	</head>
+	<body>
+		<div class="shell">
+			<aside class="sidebar">
+				<div class="brand">
+					<span class="brand-name">KIWI</span>
+					<span class="brand-sub">server</span>
+				</div>
+				<nav class="nav" hx-boost="true">
+					@navItem("/", "대시보드", "dashboard", active)
+					@navItem("/machines", "기기", "machines", active)
+					@navItem("/settings", "설정", "settings", active)
+					@navItem("/docs", "자료", "docs", active)
+				</nav>
+				<div class="sidebar-foot">
+					<span class="dot"></span> 실행 중 · 로컬망
+				</div>
+			</aside>
+			<main class="content">
+				{ children... }
+			</main>
+		</div>
+	</body>
+	</html>
+}
