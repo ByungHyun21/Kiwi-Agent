@@ -9,6 +9,7 @@ import (
 
 func sized(t *testing.T, w, h int) Model {
 	t.Helper()
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir()) // isolate config persistence
 	m := New()
 	mm, _ := m.Update(tea.WindowSizeMsg{Width: w, Height: h})
 	return mm.(Model)
@@ -52,13 +53,14 @@ func TestPopupScrollsToLaterCommands(t *testing.T) {
 	m := sized(t, 100, 30)
 	m.msgIn.SetValue("/")
 	mm := m
-	for range 14 { // /rename is item index 14 of 16; step the selection there
+	for range len(commands) { // step until /rename scrolls into the window
 		next, _ := mm.Update(tea.KeyMsg{Type: tea.KeyDown})
 		mm = next.(Model)
+		if strings.Contains(mm.View(), "/rename") {
+			return
+		}
 	}
-	if !strings.Contains(mm.View(), "/rename") {
-		t.Fatal("scrolling did not bring /rename into view")
-	}
+	t.Fatal("scrolling did not bring /rename into view")
 }
 
 func TestCommandPopupFilters(t *testing.T) {
@@ -174,5 +176,56 @@ func TestPanelRendersAtNarrowWidth(t *testing.T) {
 	lines := strings.Split(view, "\n")
 	if len(lines) != 24 {
 		t.Fatalf("frame height = %d, want 24", len(lines))
+	}
+}
+
+func TestLanguageSwitchesUIStrings(t *testing.T) {
+	m := sized(t, 100, 30)
+	m2 := submit(m, "/language en")
+	view := m2.View()
+	if !strings.Contains(view, "Server disconnected") || !strings.Contains(view, "Project") {
+		t.Fatal("English strings not applied")
+	}
+	if strings.Contains(view, "서버 연결 끊김") {
+		t.Fatal("Korean strings still rendered after switch")
+	}
+	m3 := submit(m2, "/language ja")
+	if !strings.Contains(m3.View(), "サーバー未接続") {
+		t.Fatal("Japanese strings not applied")
+	}
+}
+
+func TestLanguagePopupListsAllLanguages(t *testing.T) {
+	m := sized(t, 100, 30)
+	m.msgIn.SetValue("/language ")
+	view := m.View()
+	for _, s := range []string{"ko", "en", "zh", "ja", "한국어", "English", "中文", "日本語"} {
+		if !strings.Contains(view, s) {
+			t.Fatalf("language popup missing %s", s)
+		}
+	}
+}
+
+func TestLanguagePersistsAcrossRestart(t *testing.T) {
+	m := sized(t, 100, 30)
+	submit(m, "/language zh")
+	if !configExists() {
+		t.Fatal("config file not written")
+	}
+	fresh := New() // simulates restarting kiwi
+	fm, _ := fresh.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	if !strings.Contains(fm.(Model).View(), "服务器未连接") {
+		t.Fatal("language not restored from disk")
+	}
+}
+
+func TestInvalidLanguageShowsUsage(t *testing.T) {
+	m := sized(t, 100, 30)
+	m2 := submit(m, "/language xx")
+	if !strings.Contains(m2.View(), "사용법: /language") {
+		t.Fatal("invalid language did not show usage")
+	}
+	if m2.lang != LangKo {
+		t.Fatalf("invalid language changed lang to %q", m2.lang)
 	}
 }

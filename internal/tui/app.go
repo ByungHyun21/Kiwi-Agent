@@ -3,6 +3,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
@@ -12,11 +13,10 @@ import (
 )
 
 var (
-	colorAccent = lipgloss.Color("#4f7a2c")
-	colorDeep   = lipgloss.Color("#3c5e20")
-	colorSoft   = lipgloss.Color("#6b7062")
-	colorLine   = lipgloss.Color("#c9c4b4")
-	colorAmber  = lipgloss.Color("#a86a1f")
+	colorDeep  = lipgloss.Color("#3c5e20")
+	colorSoft  = lipgloss.Color("#6b7062")
+	colorLine  = lipgloss.Color("#c9c4b4")
+	colorAmber = lipgloss.Color("#a86a1f")
 
 	titleStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#ffffff")).
@@ -60,29 +60,31 @@ const (
 )
 
 // command describes one slash command shown in the popup.
+// Descriptions come from the active language table.
 type command struct {
 	name  string
-	desc  string
 	alias string // optional short form shown in the popup
 }
 
 var commands = []command{
-	{"/project", "프로젝트 선택 · 전환", ""},
-	{"/new", "새 세션 시작", ""},
-	{"/stop", "작업 중단", "esc"},
-	{"/resume", "세션 이어하기", ""},
-	{"/skill", "스킬 관리", ""},
-	{"/model", "모델 변경", ""},
-	{"/btw", "사이드 질문 (본 흐름 유지)", ""},
-	{"/update", "kiwi 자가 업데이트", ""},
-	{"/goal", "목표 확인 · 설정", ""},
-	{"/queue", "프롬프트 대기열 추가", "/q"},
-	{"/usage", "토큰 사용량 확인", ""},
-	{"/git", "git 작업 (branch · fork …)", ""},
-	{"/mcp", "MCP 서버 관리", ""},
-	{"/compact", "컨텍스트 압축", ""},
-	{"/rename", "세션 이름 변경", ""},
-	{"/init", "프로젝트 초기화", ""},
+	{"/project", ""},
+	{"/new", ""},
+	{"/resume", ""},
+	{"/stop", "esc"},
+	{"/exit", ""},
+	{"/skill", ""},
+	{"/model", ""},
+	{"/btw", ""},
+	{"/update", ""},
+	{"/goal", ""},
+	{"/queue", "/q"},
+	{"/usage", ""},
+	{"/git", ""},
+	{"/mcp", ""},
+	{"/compact", ""},
+	{"/rename", ""},
+	{"/init", ""},
+	{"/language", ""},
 }
 
 var gitSubcommands = []string{"branch", "fork", "commit", "log", "status"}
@@ -98,6 +100,7 @@ type popupItem struct {
 // Model is the bubbletea model for the kiwi client surface.
 type Model struct {
 	msgIn     textinput.Model
+	lang      Lang
 	connected bool
 	addr      string
 	project   string
@@ -111,13 +114,15 @@ type Model struct {
 }
 
 // New returns the initial model, starting directly at the main screen.
+// The language preference is loaded from disk.
 func New() Model {
+	lang := loadLang()
 	m := textinput.New()
-	m.Placeholder = "메시지 입력 · / 를 입력하면 명령어 보기"
+	m.Placeholder = translations[lang].Placeholder
 	m.Prompt = "> "
 	m.CharLimit = 4000
 	m.Focus()
-	return Model{msgIn: m}
+	return Model{msgIn: m, lang: lang}
 }
 
 // Init implements tea.Model.
@@ -129,19 +134,39 @@ func (m Model) candidates() []popupItem {
 	if !strings.HasPrefix(v, "/") {
 		return nil
 	}
-	if strings.HasPrefix(v, "/git ") {
-		arg := strings.TrimPrefix(v, "/git ")
-		if arg == "" || strings.Contains(arg, " ") {
-			if arg == "" {
-				items := make([]popupItem, 0, len(gitSubcommands))
-				for _, s := range gitSubcommands {
-					items = append(items, popupItem{left: "/git " + s, name: s, desc: ""})
-				}
-				return items
+
+	if arg, ok := strings.CutPrefix(v, "/language "); ok {
+		if arg == "" {
+			items := make([]popupItem, 0, len(langOrder))
+			for _, l := range langOrder {
+				items = append(items, popupItem{left: "/language " + string(l), name: string(l), desc: langNames[l]})
 			}
+			return items
+		}
+		if strings.Contains(arg, " ") {
 			return nil
 		}
-		items := make([]popupItem, 0, len(gitSubcommands))
+		var items []popupItem
+		for _, l := range langOrder {
+			if strings.HasPrefix(string(l), arg) {
+				items = append(items, popupItem{left: "/language " + string(l), name: string(l), desc: langNames[l]})
+			}
+		}
+		return items
+	}
+
+	if arg, ok := strings.CutPrefix(v, "/git "); ok {
+		if arg == "" {
+			items := make([]popupItem, 0, len(gitSubcommands))
+			for _, s := range gitSubcommands {
+				items = append(items, popupItem{left: "/git " + s, name: s, desc: ""})
+			}
+			return items
+		}
+		if strings.Contains(arg, " ") {
+			return nil
+		}
+		var items []popupItem
 		for _, s := range gitSubcommands {
 			if strings.HasPrefix(s, arg) {
 				items = append(items, popupItem{left: "/git " + s, name: s, desc: ""})
@@ -149,13 +174,15 @@ func (m Model) candidates() []popupItem {
 		}
 		return items
 	}
+
 	if strings.Contains(v, " ") {
 		return nil // command already complete, typing arguments
 	}
+	t := m.t()
 	items := make([]popupItem, 0, len(commands))
 	for _, c := range commands {
 		if strings.HasPrefix(c.name, v) || (c.alias != "" && strings.HasPrefix(c.alias, v)) {
-			items = append(items, popupItem{left: c.name, name: c.name, alias: c.alias, desc: c.desc})
+			items = append(items, popupItem{left: c.name, name: c.name, alias: c.alias, desc: t.CmdDescs[c.name]})
 		}
 	}
 	return items
@@ -255,16 +282,30 @@ func (m Model) runCommand(raw string) (tea.Model, tea.Cmd, bool) {
 		return m, nil, false
 	}
 	fields := strings.Fields(line)
+	t := m.t()
 	switch fields[0] {
 	case "/exit":
 		return m, tea.Quit, true
 	case "/server":
 		m.msgIn.SetValue("")
 		if len(fields) < 2 {
-			m.notice = hintStyle.Render("사용법: /server <호스트:포트>")
+			m.notice = hintStyle.Render(t.ServerUsage)
 		} else {
 			m.addr = fields[1] // stored only; the address is never displayed
 			m.notice = ""
+		}
+		return m, nil, true
+	case "/language":
+		m.msgIn.SetValue("")
+		if len(fields) < 2 || !validLang(Lang(fields[1])) {
+			m.notice = hintStyle.Render(t.LanguageUsage)
+			return m, nil, true
+		}
+		m.lang = Lang(fields[1])
+		m.msgIn.Placeholder = m.t().Placeholder
+		m.notice = fmt.Sprintf(m.t().LanguageChanged, langNames[m.lang])
+		if err := saveLang(m.lang); err != nil {
+			m.notice = m.t().SaveFailed + ": " + err.Error()
 		}
 		return m, nil, true
 	default:
@@ -295,23 +336,22 @@ func (m Model) conversation(width, height int) string {
 }
 
 // View implements tea.Model.
-func (m Model) View() string {
-	return m.viewMain()
-}
+func (m Model) View() string { return m.viewMain() }
 
 func (m Model) statusBadge() string {
 	if m.connected {
-		return badgeOn.Render("서버 연결됨")
+		return badgeOn.Render(m.t().Connected)
 	}
-	return badgeOff.Render("서버 연결 끊김")
+	return badgeOff.Render(m.t().Disconnected)
 }
 
 func (m Model) rightPanel(height, width int) string {
+	t := m.t()
 	sections := []string{
-		labelStyle.Render("프로젝트"),
+		labelStyle.Render(t.ProjectLabel),
 		m.projectLine(width - 4),
 		"",
-		labelStyle.Render("세션"),
+		labelStyle.Render(t.SessionLabel),
 		m.sessionLines(width - 6),
 	}
 	content := lipgloss.JoinVertical(lipgloss.Left, sections...)
@@ -327,14 +367,14 @@ func (m Model) rightPanel(height, width int) string {
 
 func (m Model) projectLine(width int) string {
 	if m.project == "" {
-		return mutedStyle.Render("없음")
+		return mutedStyle.Render(m.t().None)
 	}
 	return truncate(m.project, width)
 }
 
 func (m Model) sessionLines(width int) string {
 	if len(m.sessions) == 0 {
-		return mutedStyle.Render("세션 없음")
+		return mutedStyle.Render(m.t().NoSessions)
 	}
 	var b strings.Builder
 	for i, s := range m.sessions {
@@ -346,21 +386,12 @@ func (m Model) sessionLines(width int) string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
-// popupView renders the command popup shown below the input.
+// popupView renders the full-width command popup shown below the input:
+// command name on the left, description flush right.
 func (m Model) popupView(width int) string {
 	items := m.candidates()
 	if len(items) == 0 || m.popupGone {
 		return ""
-	}
-
-	nameW := 0
-	for _, it := range items {
-		if w := lipgloss.Width(it.name); w > nameW {
-			nameW = w
-		}
-	}
-	if nameW < 8 {
-		nameW = 8
 	}
 
 	// visible window around the selection
@@ -377,6 +408,12 @@ func (m Model) popupView(width int) string {
 	}
 	visible := items[start:min(start+popupMaxRows, len(items))]
 
+	// rows are padded to full width so the selection highlight spans the box
+	rowW := width - 4 // box border (2) + left padding
+	if rowW < 20 {
+		rowW = 20
+	}
+
 	var rows []string
 	for i, it := range visible {
 		idx := start + i
@@ -384,30 +421,27 @@ func (m Model) popupView(width int) string {
 		if it.alias != "" {
 			name += " " + popupAliasStyle.Render("("+it.alias+")")
 		}
-		nameCol := padRight(name, nameW+4)
-		row := nameCol + it.desc
-		if idx == sel {
-			row = popupSelStyle.Render(ansi.Truncate(row, width-6, "…"))
+		var row string
+		if it.desc == "" {
+			row = name
 		} else {
-			row = ansi.Truncate(row, width-6, "…")
+			gap := rowW - lipgloss.Width(name) - lipgloss.Width(it.desc) - 1
+			if gap < 1 {
+				gap = 1
+			}
+			row = name + strings.Repeat(" ", gap) + it.desc
+		}
+		row = padRight(row, rowW)
+		if idx == sel {
+			row = popupSelStyle.Render(row)
 		}
 		rows = append(rows, row)
 	}
 
 	return popupStyle.
-		Width(min(width-4, longest(items, nameW)+6)).
+		Width(rowW).
 		MaxHeight(popupMaxRows + 2).
 		Render(strings.Join(rows, "\n"))
-}
-
-func longest(items []popupItem, nameW int) int {
-	max := nameW + 6
-	for _, it := range items {
-		if w := nameW + 4 + lipgloss.Width(it.desc); w > max {
-			max = w
-		}
-	}
-	return max
 }
 
 func padRight(s string, w int) string {
@@ -474,11 +508,11 @@ func (m Model) viewMain() string {
 	if leftWidth < 4 {
 		leftWidth = 4
 	}
-	popup := m.popupView(leftWidth)
+	popup := m.popupView(m.width)
 	popupLines := lipgloss.Height(popup)
 
-	// fixed bottom: blank + input + popup + notice + help below the body
-	chrome := 6 + popupLines
+	// fixed bottom: blank + divider + input + popup + notice + help
+	chrome := 7 + popupLines
 	bodyHeight := m.height - chrome
 	if bodyHeight < 4 {
 		bodyHeight = 4
@@ -490,13 +524,21 @@ func (m Model) viewMain() string {
 	right := m.rightPanel(bodyHeight, panelWidth(m.width))
 	body := lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 
-	help := hintStyle.Render("명령어: / · 선택 ↑↓ Tab · Esc 닫기    /exit 종료")
+	divider := lipgloss.NewStyle().
+		Foreground(colorLine).
+		Render(strings.Repeat("─", max(10, m.width-2)))
+
+	t := m.t()
+	helpLeft := hintStyle.Render(t.HelpLeft)
+	helpRight := hintStyle.Render(t.HelpRight)
+	help := padRight(helpLeft, max(10, m.width-2)-lipgloss.Width(helpRight)) + helpRight
 
 	cols := []string{
 		header,
 		"",
 		body,
 		"",
+		divider,
 		m.msgIn.View(),
 	}
 	if popupLines > 0 {
