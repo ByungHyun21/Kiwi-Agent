@@ -28,11 +28,6 @@ var (
 	labelStyle = lipgloss.NewStyle().Foreground(colorSoft).Bold(true)
 	mutedStyle = lipgloss.NewStyle().Foreground(colorSoft)
 
-	panelStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(colorLine).
-			Padding(0, 1)
-
 	popupStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(colorDeep).
@@ -353,22 +348,26 @@ func (m Model) statusBadge() string {
 	return badgeOff.Render(m.t().Disconnected)
 }
 
+// rightPanel renders the sidebar content without a box: it sits right of a
+// vertical rule that spans from the top of the window to the input divider.
 func (m Model) rightPanel(height, width int) string {
 	t := m.t()
 	sections := []string{
+		"", // keep clear of the header row
+		"",
 		labelStyle.Render(t.ProjectLabel),
-		m.projectLine(width - 4),
+		m.projectLine(width - 2),
 		"",
 		labelStyle.Render(t.SessionLabel),
-		m.sessionLines(width - 6),
+		m.sessionLines(width - 4),
 	}
 	content := lipgloss.JoinVertical(lipgloss.Left, sections...)
-	inner := height - 2 // top/bottom border
-	if inner > lipgloss.Height(content) {
-		content += strings.Repeat("\n", inner-lipgloss.Height(content))
+	if height > lipgloss.Height(content) {
+		content += strings.Repeat("\n", height-lipgloss.Height(content))
 	}
-	return panelStyle.
+	return lipgloss.NewStyle().
 		Width(width).
+		PaddingLeft(1).
 		MaxHeight(height).
 		Render(content)
 }
@@ -509,25 +508,33 @@ func (m Model) viewMain() string {
 		m.statusBadge(),
 	)
 
-	leftWidth := m.width - panelWidth(m.width) - 4 // panel border+padding
+	pw := panelWidth(m.width)
+	leftWidth := m.width - pw - 3 // vertical rule + panel padding
 	if leftWidth < 4 {
 		leftWidth = 4
 	}
 	popup := m.popupView(m.width)
 	popupLines := lipgloss.Height(popup)
 
-	// fixed bottom: blank + divider + input + popup + notice + help
-	chrome := 7 + popupLines
+	// body = header + blank + conversation; the vertical rule runs along its
+	// right edge from the top of the window down to the input divider
+	chrome := 6 + popupLines // 2 header lines + divider + input + notice + help
 	bodyHeight := m.height - chrome
 	if bodyHeight < 4 {
 		bodyHeight = 4
 	}
 
 	// conversation area: sent messages, bottom-aligned; blank until any exist
-	left := m.conversation(leftWidth, bodyHeight)
+	conversation := m.conversation(leftWidth, bodyHeight)
 
-	right := m.rightPanel(bodyHeight, panelWidth(m.width))
-	body := lipgloss.JoinHorizontal(lipgloss.Top, left, right)
+	leftCol := lipgloss.JoinVertical(lipgloss.Left, header, "", conversation)
+	leftCol = lipgloss.NewStyle().
+		Border(lipgloss.NormalBorder(), false, true, false, false).
+		BorderForeground(colorLine).
+		Render(leftCol)
+
+	right := m.rightPanel(bodyHeight+2, pw)
+	body := lipgloss.JoinHorizontal(lipgloss.Top, leftCol, right)
 
 	divider := lipgloss.NewStyle().
 		Foreground(colorLine).
@@ -539,10 +546,7 @@ func (m Model) viewMain() string {
 	help := padRight(helpLeft, max(10, m.width-2)-lipgloss.Width(helpRight)) + helpRight
 
 	cols := []string{
-		header,
-		"",
 		body,
-		"",
 		divider,
 		m.msgIn.View(),
 	}
