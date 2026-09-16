@@ -1,0 +1,71 @@
+# Secrets
+.env
+.env.*
+*.pem
+*.key
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+eggs/
+*.egg-info/
+.installed.cfg
+*.egg
+.venv/
+venv/
+env/
+.python-version
+
+# Testing / coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+
+# Type checkers / linters
+.mypy_cache/
+.ruff_cache/
+.pytype/
+
+# Node (if web UI is added)
+node_modules/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Databases / artifacts
+*.sqlite
+*.sqlite3
+*.db
+chroma_store/
+data/cache/
+logs/
+*.log
+
+# Model / runtime artifacts
+models/
+.cache/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Local-only files (agent config, internal docs/plans)
+AGENTS.md
+docs/
+plans/
+
+# OS
+.DS_Store
+Thumbs.db
