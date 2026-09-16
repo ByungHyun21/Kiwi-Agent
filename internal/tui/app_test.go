@@ -63,6 +63,23 @@ func TestPopupScrollsToLaterCommands(t *testing.T) {
 	t.Fatal("scrolling did not bring /rename into view")
 }
 
+func TestTabCompletesSelectedCommand(t *testing.T) {
+	m := sized(t, 100, 30)
+	m.msgIn.SetValue("/langu") // single candidate
+	m1, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	if got := m1.(Model).msgIn.Value(); got != "/language" {
+		t.Fatalf("Tab completed to %q, want /language", got)
+	}
+
+	m2 := sized(t, 100, 30)
+	m2.msgIn.SetValue("/r") // candidates: /resume, /rename
+	m3, _ := m2.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m4, _ := m3.Update(tea.KeyMsg{Type: tea.KeyTab})
+	if got := m4.(Model).msgIn.Value(); got != "/rename" {
+		t.Fatalf("Tab completed to %q, want /rename (selected item)", got)
+	}
+}
+
 func TestCtrlCClearsInputWithoutQuitting(t *testing.T) {
 	m := sized(t, 100, 30)
 	m.msgIn.SetValue("긴 입력 중이던 내용")

@@ -71,6 +71,7 @@ var commands = []command{
 	{"/new", ""},
 	{"/resume", ""},
 	{"/stop", "esc"},
+	{"/server", ""},
 	{"/exit", ""},
 	{"/skill", ""},
 	{"/model", ""},
@@ -202,7 +203,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if popupOpen {
 			switch msg.Type {
-			case tea.KeyUp, tea.KeyDown, tea.KeyTab:
+			case tea.KeyTab:
+				// replace the input with the selected command
+				m.msgIn.SetValue(items[m.clampPopupSel(len(items))].left)
+				return m, nil
+			case tea.KeyUp, tea.KeyDown:
 				if msg.Type == tea.KeyUp {
 					m.popupSel--
 				} else {
@@ -390,7 +395,8 @@ func (m Model) sessionLines(width int) string {
 }
 
 // popupView renders the full-width command popup shown below the input:
-// command name on the left, description flush right.
+// name column and description column, both left-aligned, rows padded to
+// the full width so the selection highlight spans the box.
 func (m Model) popupView(width int) string {
 	items := m.candidates()
 	if len(items) == 0 || m.popupGone {
@@ -411,10 +417,15 @@ func (m Model) popupView(width int) string {
 	}
 	visible := items[start:min(start+popupMaxRows, len(items))]
 
-	// rows are padded to full width so the selection highlight spans the box
 	rowW := width - 4 // box border (2) + left padding
 	if rowW < 20 {
 		rowW = 20
+	}
+
+	// name column width from all candidates, not just the visible window
+	nameW := 0
+	for _, it := range items {
+		nameW = max(nameW, lipgloss.Width(it.name)+4)
 	}
 
 	var rows []string
@@ -424,16 +435,7 @@ func (m Model) popupView(width int) string {
 		if it.alias != "" {
 			name += " " + popupAliasStyle.Render("("+it.alias+")")
 		}
-		var row string
-		if it.desc == "" {
-			row = name
-		} else {
-			gap := rowW - lipgloss.Width(name) - lipgloss.Width(it.desc) - 1
-			if gap < 1 {
-				gap = 1
-			}
-			row = name + strings.Repeat(" ", gap) + it.desc
-		}
+		row := padRight(name, nameW) + it.desc
 		row = padRight(row, rowW)
 		if idx == sel {
 			row = popupSelStyle.Render(row)
