@@ -36,6 +36,11 @@ type msgs struct {
 	Disconnected    string
 	ProjectLabel    string
 	SessionLabel    string
+	ModelLabel      string
+	MachineLabel    string
+	ContextLabel    string
+	GoalLabel       string
+	TodoLabel       string
 	None            string
 	NoSessions      string
 	HelpLeft        string
@@ -56,6 +61,11 @@ var translations = map[Lang]msgs{
 		SessionLabel:    "세션",
 		None:            "없음",
 		NoSessions:      "세션 없음",
+		ModelLabel:      "모델",
+		MachineLabel:    "기기",
+		ContextLabel:    "문맥",
+		GoalLabel:       "목표",
+		TodoLabel:       "할 일",
 		HelpLeft:        "명령어: / · 선택 ↑↓ Tab · Esc 닫기",
 		HelpRight:       "/exit 종료",
 		ServerUsage:     "사용법: /server <호스트:포트>",
@@ -91,6 +101,11 @@ var translations = map[Lang]msgs{
 		SessionLabel:    "Sessions",
 		None:            "None",
 		NoSessions:      "No sessions",
+		ModelLabel:      "Model",
+		MachineLabel:    "Machine",
+		ContextLabel:    "Context",
+		GoalLabel:       "Goal",
+		TodoLabel:       "Todo",
 		HelpLeft:        "Commands: / · select ↑↓ Tab · Esc close",
 		HelpRight:       "/exit quit",
 		ServerUsage:     "Usage: /server <host:port>",
@@ -126,6 +141,11 @@ var translations = map[Lang]msgs{
 		SessionLabel:    "会话",
 		None:            "无",
 		NoSessions:      "暂无会话",
+		ModelLabel:      "模型",
+		MachineLabel:    "设备",
+		ContextLabel:    "上下文",
+		GoalLabel:       "目标",
+		TodoLabel:       "待办",
 		HelpLeft:        "命令: / · 选择 ↑↓ Tab · Esc 关闭",
 		HelpRight:       "/exit 退出",
 		ServerUsage:     "用法: /server <host:port>",
@@ -161,6 +181,11 @@ var translations = map[Lang]msgs{
 		SessionLabel:    "セッション",
 		None:            "なし",
 		NoSessions:      "セッションなし",
+		ModelLabel:      "モデル",
+		MachineLabel:    "機器",
+		ContextLabel:    "コンテキスト",
+		GoalLabel:       "目標",
+		TodoLabel:       "タスク",
 		HelpLeft:        "コマンド: / · 選択 ↑↓ Tab · Esc で閉じる",
 		HelpRight:       "/exit 終了",
 		ServerUsage:     "使い方: /server <host:port>",

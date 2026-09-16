@@ -280,3 +280,28 @@ func TestInvalidLanguageShowsUsage(t *testing.T) {
 		t.Fatalf("invalid language changed lang to %q", m2.lang)
 	}
 }
+
+func TestPanelStatusSections(t *testing.T) {
+	m := sized(t, 100, 30)
+	view := m.View()
+	for _, label := range []string{"모델", "기기", "문맥", "목표", "할 일"} {
+		if !strings.Contains(view, label) {
+			t.Fatalf("panel missing section %q", label)
+		}
+	}
+	if !strings.Contains(view, "0%") {
+		t.Fatal("context gauge percentage missing")
+	}
+
+	m.model = "qwen3:32b"
+	m.machine = "dev-pc"
+	m.goal = "회로 검토"
+	m.ctxUsed, m.ctxMax = 25000, 100000
+	m.todos = []string{"스키마 정리", "테스트"}
+	view = m.View()
+	for _, want := range []string{"qwen3:32b", "dev-pc", "회로 검토", "스키마 정리", "25%"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("panel value %q not rendered", want)
+		}
+	}
+}
