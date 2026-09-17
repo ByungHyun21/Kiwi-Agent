@@ -462,13 +462,15 @@ func (m Model) viewMain() string {
 		bodyHeight = 4
 	}
 
-	// conversation or fullscreen menu, right of the vertical rule
+	// conversation or fullscreen menu, right of the vertical rule;
+	// force the full column width even when the transcript is empty
 	var left string
 	if m.menu != nil {
 		left = m.menu.render(leftWidth, bodyHeight)
 	} else {
 		left = m.renderTranscript(leftWidth, bodyHeight)
 	}
+	left = lipgloss.NewStyle().Width(leftWidth).MaxHeight(bodyHeight).Render(left)
 
 	leftCol := lipgloss.JoinVertical(lipgloss.Left, header, "", left)
 	leftCol = lipgloss.NewStyle().
