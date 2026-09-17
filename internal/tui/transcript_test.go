@@ -132,3 +132,19 @@ func TestTerminalNoiseSanitized(t *testing.T) {
 		}
 	}
 }
+
+func TestNewClearsTranscript(t *testing.T) {
+	m := New()
+	mm, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+	m2 := mm.(Model)
+	m2.transcript = append(m2.transcript, tline{kind: lineUser, text: "이전 세션 흔적"})
+	m2.client = &wsClient{} // connected; the returned Cmd is never run here
+
+	next, _ := cmdNew(m2, []string{"/new"})
+	if len(next.(Model).transcript) != 0 {
+		t.Fatalf("transcript not cleared: %d lines", len(next.(Model).transcript))
+	}
+	if next.(Model).scroll != -1 {
+		t.Fatal("scroll not reset to follow")
+	}
+}

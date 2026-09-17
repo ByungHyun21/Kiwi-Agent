@@ -123,6 +123,10 @@ func cmdNew(m Model, fields []string) (tea.Model, tea.Cmd) {
 	if !m.requireConn() {
 		return m, nil
 	}
+	// a fresh session starts on a blank screen
+	m.transcript = nil
+	m.streamKind = -1
+	m.scroll = -1
 	return m, sendCmd(m.client, protocol.ClientMsg{Type: protocol.MsgNew, Text: arg(fields)})
 }
 
