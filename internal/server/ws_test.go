@@ -40,6 +40,7 @@ func newTestServer(t *testing.T) (*httptest.Server, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	lastStore = st
 	hs := httptest.NewServer(srv.Handler())
 	t.Cleanup(hs.Close)
 	return hs, srv.Token()
@@ -129,3 +130,55 @@ func TestWSRejectsBadToken(t *testing.T) {
 }
 
 var _ exec.Runner = fakeRunner{}
+
+func TestWSResumeReplaysHistory(t *testing.T) {
+	hs, token := newTestServer(t)
+	c := dial(t, hs, token)
+	send := func(m protocol.ClientMsg) {
+		data, _ := json.Marshal(m)
+		c.Write(context.Background(), websocket.MessageText, data)
+	}
+	readEv(t, c) // hello
+	readEv(t, c) // sessions
+	readEv(t, c) // state
+
+	send(protocol.ClientMsg{Type: protocol.MsgProject, Text: "kiwi_test"})
+	readEv(t, c) // state
+	readEv(t, c) // sessions
+	send(protocol.ClientMsg{Type: protocol.MsgNew})
+	sess := readEv(t, c) // sessions (1)
+	sid := sess.Sessions[0].ID
+	readEv(t, c) // state
+
+	// store a prior exchange directly
+	st := hsToStore(t, hs)
+	st.AppendMessage(sid, store.Message{Role: "user", Content: "랜딩 페이지 만들어"})
+	st.AppendMessage(sid, store.Message{Role: "assistant", ToolCalls: []store.ToolCallSt{{ID: "1", Name: "write_file", Args: `{"path":"index.html"}`}}})
+	st.AppendMessage(sid, store.Message{Role: "tool", Content: "index.html 생성됨 (100 bytes)", ToolCallID: "1", Name: "write_file"})
+	st.AppendMessage(sid, store.Message{Role: "assistant", Content: "완료했습니다"})
+
+	send(protocol.ClientMsg{Type: protocol.MsgResume, SessionID: sid})
+	ev := readEv(t, c) // history
+	if ev.Type != protocol.EvHistory || len(ev.History) != 4 {
+		t.Fatalf("history = %+v", ev.History)
+	}
+	if ev.History[0].Kind != "user" || ev.History[1].Kind != "tool" ||
+		ev.History[2].Kind != "result" || ev.History[3].Kind != "assistant" {
+		t.Fatalf("history kinds = %+v", ev.History)
+	}
+	if ev.History[2].Text != "index.html 생성됨 (100 bytes)" {
+		t.Fatalf("result text = %q", ev.History[2].Text)
+	}
+}
+
+// hsToStore reopens the store behind a test server (same temp dir).
+func hsToStore(t *testing.T, hs *httptest.Server) *store.Store {
+	t.Helper()
+	// the server's store path is its temp dir; re-open by finding the db file
+	// simplest: track via global test hook — instead reuse the same Store by
+	// reconstructing from the server. For test purposes we use a package-level
+	// lastStore set by newTestServer.
+	return lastStore
+}
+
+var lastStore *store.Store

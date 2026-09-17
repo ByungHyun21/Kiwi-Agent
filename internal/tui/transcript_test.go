@@ -67,3 +67,25 @@ func TestStreamAppendOnlyRewrapsLastLine(t *testing.T) {
 		t.Fatal("appended delta not rendered")
 	}
 }
+
+func TestAssistantMarkdownRenders(t *testing.T) {
+	m := New()
+	mm, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	m2 := mm.(Model)
+	m2.busy = false
+	m2.transcript = append(m2.transcript, tline{kind: lineAssistant, text: "| 파일 | 크기 |\n|---|---|\n| index.html | 2KB |\n\n```html\n<h1>Hi</h1>\n```\n\n- 첫 번째 항목\n- 두 번째 항목\n"})
+	view := m2.View()
+	// glamour renders GFM tables with padding pipes and code blocks with a bordered/indented block
+	if !strings.Contains(view, "|") {
+		t.Fatal("table not rendered")
+	}
+	if !strings.Contains(view, "Hi") {
+		t.Fatal("code block content missing")
+	}
+	if !strings.Contains(view, "•") {
+		t.Fatal("bullet not rendered")
+	}
+	if !strings.Contains(view, "첫 번째 항목") {
+		t.Fatal("bullet text missing")
+	}
+}

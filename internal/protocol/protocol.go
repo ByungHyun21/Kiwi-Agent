@@ -66,19 +66,27 @@ const (
 	EvStatus     = "status" // working | idle
 	EvSessions   = "sessions"
 	EvState      = "state"
+	EvHistory    = "history" // replay of a resumed session
 )
 
 // Event is a server→client WS message.
 type Event struct {
-	Type     string        `json:"type"`
-	Session  string        `json:"session,omitempty"` // current session id
-	Text     string        `json:"text,omitempty"`
-	Name     string        `json:"name,omitempty"`   // tool name, status value
-	Args     string        `json:"args,omitempty"`   // raw tool arguments
-	Result   string        `json:"result,omitempty"` // raw tool output
-	Error    string        `json:"error,omitempty"`
-	Sessions []SessionInfo `json:"sessions,omitempty"`
-	State    *PanelState   `json:"state,omitempty"`
+	Type     string         `json:"type"`
+	Session  string         `json:"session,omitempty"` // current session id
+	Text     string         `json:"text,omitempty"`
+	Name     string         `json:"name,omitempty"`   // tool name, status value
+	Args     string         `json:"args,omitempty"`   // raw tool arguments
+	Result   string         `json:"result,omitempty"` // raw tool output
+	Error    string         `json:"error,omitempty"`
+	Sessions []SessionInfo  `json:"sessions,omitempty"`
+	State    *PanelState    `json:"state,omitempty"`
+	History  []HistoryEntry `json:"history,omitempty"`
+}
+
+// HistoryEntry is one replayed transcript entry for a resumed session.
+type HistoryEntry struct {
+	Kind string `json:"kind"` // user | assistant | tool | result | notice
+	Text string `json:"text"`
 }
 
 // Client→server WS message types.

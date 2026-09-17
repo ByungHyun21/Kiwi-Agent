@@ -129,6 +129,7 @@ func (c *conn) handle(msg protocol.ClientMsg) {
 				c.projID, c.proj = p.ID, p.Name
 			}
 		}
+		c.pushHistory()
 		c.pushState()
 		c.pushSessions(c.projID)
 	case protocol.MsgSessions:
@@ -282,6 +283,35 @@ func (c *conn) currentProject() int64 {
 		return 0
 	}
 	return sess.ProjectID
+}
+
+// pushHistory replays the stored transcript of the current session.
+func (c *conn) pushHistory() {
+	msgs, err := c.srv.store.Messages(c.sess)
+	if err != nil {
+		return
+	}
+	var entries []protocol.HistoryEntry
+	for _, m := range msgs {
+		switch m.Role {
+		case "user":
+			entries = append(entries, protocol.HistoryEntry{Kind: "user", Text: m.Content})
+		case "assistant":
+			if m.Content != "" {
+				entries = append(entries, protocol.HistoryEntry{Kind: "assistant", Text: m.Content})
+			}
+			for _, tc := range m.ToolCalls {
+				args := tc.Args
+				if len(args) > 120 {
+					args = args[:120] + "…"
+				}
+				entries = append(entries, protocol.HistoryEntry{Kind: "tool", Text: tc.Name + " " + args})
+			}
+		case "tool":
+			entries = append(entries, protocol.HistoryEntry{Kind: "result", Text: m.Content})
+		}
+	}
+	c.send(protocol.Event{Type: protocol.EvHistory, Session: c.sess, History: entries})
 }
 
 func (c *conn) pushSessions(projectID int64) {

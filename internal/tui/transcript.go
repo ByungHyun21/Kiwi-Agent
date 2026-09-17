@@ -27,6 +27,7 @@ type tline struct {
 
 	wrapped   []string // display lines, cached
 	wrapWidth int      // width the cache was built for
+	live      bool     // cached as a plain streaming line
 }
 
 var (
@@ -77,22 +78,37 @@ func (k lineKind) style() lipgloss.Style {
 // displayLines returns the wrapped display lines for one entry, using and
 // maintaining a per-entry cache so streaming deltas only re-wrap the
 // growing line instead of the whole transcript.
-func (ln *tline) displayLines(width int) []string {
-	if ln.wrapped != nil && ln.wrapWidth == width {
+func (ln *tline) displayLines(width int, live bool) []string {
+	if ln.wrapped != nil && ln.wrapWidth == width && ln.live == live {
 		return ln.wrapped
 	}
 	if ln.text == "" {
-		ln.wrapped, ln.wrapWidth = []string{""}, width
+		ln.wrapped, ln.wrapWidth, ln.live = []string{""}, width, live
 		return ln.wrapped
 	}
+	// finished assistant messages render as markdown (tables, code blocks);
+	// the currently-streaming line stays plain to keep frames cheap
+	if ln.kind == lineAssistant && !live {
+		if md := renderMarkdown(width, ln.text); md != nil {
+			ln.wrapped, ln.wrapWidth, ln.live = md, width, live
+			return ln.wrapped
+		}
+	}
 	block := ln.kind.style().Width(width).Render(ln.kind.marker() + strings.TrimRight(ln.text, "\n"))
-	ln.wrapped, ln.wrapWidth = strings.Split(block, "\n"), width
+	ln.wrapped, ln.wrapWidth, ln.live = strings.Split(block, "\n"), width, live
 	return ln.wrapped
 }
 
 // invalidate drops the wrap cache (text changed).
 func (ln *tline) invalidate() {
-	ln.wrapped, ln.wrapWidth = nil, 0
+	ln.wrapped, ln.wrapWidth, ln.live = nil, 0, false
+}
+
+// invalidateLast drops the cache of the final entry (turn closed).
+func (m *Model) invalidateLast() {
+	if len(m.transcript) > 0 {
+		m.transcript[len(m.transcript)-1].invalidate()
+	}
 }
 
 // applyEvent folds one server event into the transcript.
@@ -107,22 +123,27 @@ func (m *Model) applyEvent(ev protocol.Event) {
 		if len(args) > 120 {
 			args = args[:120] + "…"
 		}
-		m.transcript = append(m.transcript, tline{lineTool, ev.Name + " " + args, nil, 0})
+		m.transcript = append(m.transcript, tline{kind: lineTool, text: ev.Name + " " + args})
 		m.streamKind = -1
 	case protocol.EvToolResult:
-		m.transcript = append(m.transcript, tline{lineResult, ev.Result, nil, 0})
+		m.transcript = append(m.transcript, tline{kind: lineResult, text: ev.Result})
 		m.streamKind = -1
 	case protocol.EvError:
-		m.transcript = append(m.transcript, tline{lineError, ev.Error, nil, 0})
+		m.transcript = append(m.transcript, tline{kind: lineError, text: ev.Error})
 		m.streamKind = -1
 	case protocol.EvStatus:
+		wasBusy := m.busy
 		m.busy = ev.Name == "working"
+		if wasBusy && !m.busy {
+			m.invalidateLast()
+		}
 		if ev.Name != "working" && ev.Name != "idle" {
-			m.transcript = append(m.transcript, tline{lineNotice, statusText(ev.Name), nil, 0})
+			m.transcript = append(m.transcript, tline{kind: lineNotice, text: statusText(ev.Name)})
 		}
 		m.streamKind = -1
 	case protocol.EvDone:
 		m.streamKind = -1
+		m.invalidateLast()
 	case protocol.EvState:
 		if ev.Session != "" {
 			m.currentSession = ev.Session
@@ -137,6 +158,13 @@ func (m *Model) applyEvent(ev protocol.Event) {
 			if ev.State.Tokens > 0 {
 				m.tokens = ev.State.Tokens
 			}
+		}
+	case protocol.EvHistory:
+		m.transcript = nil
+		m.streamKind = -1
+		m.scroll = -1
+		for _, h := range ev.History {
+			m.transcript = append(m.transcript, tline{kind: historyKind(h.Kind), text: h.Text})
 		}
 	case protocol.EvSessions:
 		m.sessions = nil
@@ -155,8 +183,22 @@ func (m *Model) appendStream(kind lineKind, text string) {
 		last.invalidate()
 		return
 	}
-	m.transcript = append(m.transcript, tline{kind, text, nil, 0})
+	m.transcript = append(m.transcript, tline{kind: kind, text: text})
 	m.streamKind = int(kind)
+}
+
+func historyKind(k string) lineKind {
+	switch k {
+	case "user":
+		return lineUser
+	case "assistant":
+		return lineAssistant
+	case "tool":
+		return lineTool
+	case "result":
+		return lineResult
+	}
+	return lineNotice
 }
 
 func statusText(name string) string {
@@ -172,10 +214,13 @@ func statusText(name string) string {
 }
 
 // totalWrapped flattens cached display lines: entries + one blank separator.
+// The last entry is rendered plain while a turn is streaming.
 func (m Model) totalWrapped(width int) []string {
 	var lines []string
+	last := len(m.transcript) - 1
 	for i := range m.transcript {
-		lines = append(lines, m.transcript[i].displayLines(width)...)
+		live := m.busy && i == last
+		lines = append(lines, m.transcript[i].displayLines(width, live)...)
 		lines = append(lines, "")
 	}
 	return lines
