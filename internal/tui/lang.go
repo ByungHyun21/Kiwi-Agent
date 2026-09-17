@@ -91,6 +91,7 @@ var translations = map[Lang]msgs{
 			"/rename":   "세션 이름 변경",
 			"/init":     "프로젝트 초기화",
 			"/language": "언어 변경",
+			"/mouse":    "마우스 휠 켜기·끄기",
 		},
 	},
 	LangEn: {
@@ -131,6 +132,7 @@ var translations = map[Lang]msgs{
 			"/rename":   "Rename session",
 			"/init":     "Initialize project",
 			"/language": "Change language",
+			"/mouse":    "Toggle mouse wheel",
 		},
 	},
 	LangZh: {
@@ -171,6 +173,7 @@ var translations = map[Lang]msgs{
 			"/rename":   "重命名会话",
 			"/init":     "初始化项目",
 			"/language": "切换语言",
+			"/mouse":    "切换鼠标滚轮",
 		},
 	},
 	LangJa: {
@@ -211,6 +214,7 @@ var translations = map[Lang]msgs{
 			"/rename":   "セッション名変更",
 			"/init":     "プロジェクト初期化",
 			"/language": "言語変更",
+			"/mouse":    "マウスホイール切替",
 		},
 	},
 }

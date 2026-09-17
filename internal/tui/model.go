@@ -52,6 +52,7 @@ type Model struct {
 
 	// ui chrome
 	lang      Lang
+	mouseOn   bool
 	notice    string
 	popupSel  int
 	popupGone bool
@@ -74,11 +75,12 @@ func New() Model {
 	in.CharLimit = 4000
 	in.Focus()
 	return Model{
-		msgIn:  in,
-		lang:   Lang(cfg.Language),
-		addr:   cfg.Server,
-		token:  cfg.Token,
-		scroll: -1,
+		msgIn:   in,
+		lang:    Lang(cfg.Language),
+		addr:    cfg.Server,
+		token:   cfg.Token,
+		scroll:  -1,
+		mouseOn: true,
 	}
 }
 

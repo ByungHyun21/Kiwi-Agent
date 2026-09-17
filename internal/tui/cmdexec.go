@@ -29,6 +29,7 @@ var commandExecs = map[string]cmdFunc{
 	"/rename":   cmdRename,
 	"/usage":    cmdUsage,
 	"/language": cmdLanguage,
+	"/mouse":    cmdMouse,
 }
 
 // runCommand executes a slash command or sends a plain message.
@@ -210,4 +211,16 @@ func cmdLanguage(m Model, fields []string) (tea.Model, tea.Cmd) {
 		m.notice = m.t().SaveFailed + ": " + err.Error()
 	}
 	return m, nil
+}
+
+// cmdMouse toggles mouse reporting: on for wheel scrolling, off for
+// native terminal text selection (Shift+drag works in both states).
+func cmdMouse(m Model, _ []string) (tea.Model, tea.Cmd) {
+	m.mouseOn = !m.mouseOn
+	if m.mouseOn {
+		m.notice = "마우스 휠 켜짐 (선택은 Shift+드래그)"
+		return m, tea.EnableMouseCellMotion
+	}
+	m.notice = "마우스 휠 꺼짐 — 드래그로 텍스트 선택 가능"
+	return m, tea.DisableMouse
 }
