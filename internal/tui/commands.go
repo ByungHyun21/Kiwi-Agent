@@ -29,7 +29,6 @@ var commands = []command{
 	{"/rename", ""},
 	{"/init", ""},
 	{"/language", ""},
-	{"/mouse", ""},
 }
 
 var gitSubcommands = []string{"branch", "fork", "commit", "log", "status"}
