@@ -160,8 +160,8 @@ func (m Model) renderTranscript(width, height int) string {
 			lines = append(lines, "")
 			continue
 		}
-		wrapped := st.Render(marker + strings.TrimRight(ln.text, "\n"))
-		wrapped = hardWrap(wrapped, width)
+		// lipgloss wraps by display cells (CJK-aware), unlike rune counting
+		wrapped := st.Width(width).Render(marker + strings.TrimRight(ln.text, "\n"))
 		lines = append(lines, wrapped)
 		// blank line between entries for visual separation
 		lines = append(lines, "")
@@ -173,30 +173,4 @@ func (m Model) renderTranscript(width, height int) string {
 		lines = append([]string{""}, lines...)
 	}
 	return strings.Join(lines, "\n")
-}
-
-// hardWrap re-wraps a rendered (possibly styled) block to width.
-func hardWrap(s string, width int) string {
-	if width < 4 {
-		return s
-	}
-	var out []string
-	for _, row := range strings.Split(s, "\n") {
-		if lipgloss.Width(row) <= width {
-			out = append(out, row)
-			continue
-		}
-		// style-naive fallback: wrap by runes preserving leading marker
-		runes := []rune(row)
-		for len(runes) > width {
-			cut := width
-			for cut > 1 && runes[cut-1]&0xC000 == 0xD800 { // don't cut mid-surrogate
-				cut--
-			}
-			out = append(out, string(runes[:cut]))
-			runes = runes[cut:]
-		}
-		out = append(out, string(runes))
-	}
-	return strings.Join(out, "\n")
 }
