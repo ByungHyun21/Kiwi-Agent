@@ -24,6 +24,9 @@ const (
 type tline struct {
 	kind lineKind
 	text string
+
+	wrapped   []string // display lines, cached
+	wrapWidth int      // width the cache was built for
 }
 
 var (
@@ -71,6 +74,27 @@ func (k lineKind) style() lipgloss.Style {
 	return lipgloss.NewStyle()
 }
 
+// displayLines returns the wrapped display lines for one entry, using and
+// maintaining a per-entry cache so streaming deltas only re-wrap the
+// growing line instead of the whole transcript.
+func (ln *tline) displayLines(width int) []string {
+	if ln.wrapped != nil && ln.wrapWidth == width {
+		return ln.wrapped
+	}
+	if ln.text == "" {
+		ln.wrapped, ln.wrapWidth = []string{""}, width
+		return ln.wrapped
+	}
+	block := ln.kind.style().Width(width).Render(ln.kind.marker() + strings.TrimRight(ln.text, "\n"))
+	ln.wrapped, ln.wrapWidth = strings.Split(block, "\n"), width
+	return ln.wrapped
+}
+
+// invalidate drops the wrap cache (text changed).
+func (ln *tline) invalidate() {
+	ln.wrapped, ln.wrapWidth = nil, 0
+}
+
 // applyEvent folds one server event into the transcript.
 func (m *Model) applyEvent(ev protocol.Event) {
 	switch ev.Type {
@@ -83,18 +107,18 @@ func (m *Model) applyEvent(ev protocol.Event) {
 		if len(args) > 120 {
 			args = args[:120] + "…"
 		}
-		m.transcript = append(m.transcript, tline{lineTool, ev.Name + " " + args})
+		m.transcript = append(m.transcript, tline{lineTool, ev.Name + " " + args, nil, 0})
 		m.streamKind = -1
 	case protocol.EvToolResult:
-		m.transcript = append(m.transcript, tline{lineResult, ev.Result})
+		m.transcript = append(m.transcript, tline{lineResult, ev.Result, nil, 0})
 		m.streamKind = -1
 	case protocol.EvError:
-		m.transcript = append(m.transcript, tline{lineError, ev.Error})
+		m.transcript = append(m.transcript, tline{lineError, ev.Error, nil, 0})
 		m.streamKind = -1
 	case protocol.EvStatus:
 		m.busy = ev.Name == "working"
 		if ev.Name != "working" && ev.Name != "idle" {
-			m.transcript = append(m.transcript, tline{lineNotice, statusText(ev.Name)})
+			m.transcript = append(m.transcript, tline{lineNotice, statusText(ev.Name), nil, 0})
 		}
 		m.streamKind = -1
 	case protocol.EvDone:
@@ -128,9 +152,10 @@ func (m *Model) appendStream(kind lineKind, text string) {
 	if m.streamKind == int(kind) && len(m.transcript) > 0 {
 		last := &m.transcript[len(m.transcript)-1]
 		last.text += text
+		last.invalidate()
 		return
 	}
-	m.transcript = append(m.transcript, tline{kind, text})
+	m.transcript = append(m.transcript, tline{kind, text, nil, 0})
 	m.streamKind = int(kind)
 }
 
@@ -146,31 +171,69 @@ func statusText(name string) string {
 	return name
 }
 
-// renderTranscript renders wrapped transcript lines, tail-fitted to height.
+// totalWrapped flattens cached display lines: entries + one blank separator.
+func (m Model) totalWrapped(width int) []string {
+	var lines []string
+	for i := range m.transcript {
+		lines = append(lines, m.transcript[i].displayLines(width)...)
+		lines = append(lines, "")
+	}
+	return lines
+}
+
+// renderTranscript renders the transcript window. scroll<0 means stick to
+// the bottom (auto-follow); scroll>=0 is a line offset from the top.
 func (m Model) renderTranscript(width, height int) string {
 	if height <= 0 {
 		return ""
 	}
-	// wrap every line to width
-	var lines []string
-	for _, ln := range m.transcript {
-		st := ln.kind.style()
-		marker := ln.kind.marker()
-		if ln.text == "" {
-			lines = append(lines, "")
-			continue
-		}
-		// lipgloss wraps by display cells (CJK-aware), unlike rune counting
-		wrapped := st.Width(width).Render(marker + strings.TrimRight(ln.text, "\n"))
-		lines = append(lines, wrapped)
-		// blank line between entries for visual separation
-		lines = append(lines, "")
+	lines := m.totalWrapped(width)
+	if len(lines) <= height {
+		return strings.Join(lines, "\n")
 	}
-	if len(lines) > height {
-		lines = lines[len(lines)-height:]
+	if m.scroll < 0 {
+		m.scroll = len(lines) - height
 	}
-	for len(lines) < height {
-		lines = append([]string{""}, lines...)
+	offset := m.scroll
+	if offset > len(lines)-height {
+		offset = len(lines) - height
 	}
-	return strings.Join(lines, "\n")
+	if offset < 0 {
+		offset = 0
+	}
+	return strings.Join(lines[offset:offset+height], "\n")
+}
+
+// scrolledUp reports whether the view is detached from the bottom.
+func (m Model) scrolledUp(width, height int) bool {
+	if m.scroll < 0 {
+		return false
+	}
+	lines := m.totalWrapped(width)
+	return m.scroll < len(lines)-height
+}
+
+// scrollBy moves the view offset, clamped; negative delta follows the tail.
+func (m *Model) scrollBy(width, height, delta int) {
+	lines := m.totalWrapped(width)
+	max := len(lines) - height
+	if max < 0 {
+		max = 0
+	}
+	pos := m.scroll
+	if pos < 0 {
+		pos = max
+	}
+	pos += delta
+	if pos > max {
+		pos = max
+	}
+	if pos < 0 {
+		pos = 0
+	}
+	if pos >= max {
+		m.scroll = -1 // re-attach to the bottom
+	} else {
+		m.scroll = pos
+	}
 }

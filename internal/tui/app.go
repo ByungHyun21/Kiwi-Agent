@@ -45,6 +45,7 @@ type Model struct {
 
 	transcript []tline
 	streamKind int
+	scroll     int // -1 = follow bottom
 	busy       bool
 	spinner    int
 
@@ -69,7 +70,7 @@ func New() Model {
 	m.Prompt = "> "
 	m.CharLimit = 4000
 	m.Focus()
-	return Model{msgIn: m, lang: Lang(cfg.Language), addr: cfg.Server, token: cfg.Token}
+	return Model{msgIn: m, lang: Lang(cfg.Language), addr: cfg.Server, token: cfg.Token, scroll: -1}
 }
 
 // Init implements tea.Model. Auto-connects when a server is configured.
@@ -82,7 +83,7 @@ func (m Model) Init() tea.Cmd {
 
 // Run starts the kiwi terminal client.
 func Run() error {
-	_, err := tea.NewProgram(New(), tea.WithAltScreen()).Run()
+	_, err := tea.NewProgram(New(), tea.WithAltScreen(), tea.WithMouseCellMotion()).Run()
 	return err
 }
 
@@ -117,7 +118,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.client = nil
 		m.connected = false
 		m.busy = false
-		m.transcript = append(m.transcript, tline{lineError, "서버 연결이 끊겼습니다"})
+		m.transcript = append(m.transcript, tline{kind: lineError, text: "서버 연결이 끊겼습니다"})
 		return m, nil
 
 	case projectsMsg:
@@ -172,7 +173,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.currentSession = newest.ID
 			return m, sendCmd(m.client, protocol.ClientMsg{Type: protocol.MsgResume, SessionID: newest.ID})
 		}
-		m.transcript = append(m.transcript, tline{lineNotice, "이 프로젝트의 세션이 없습니다. /new 로 시작하세요"})
+		m.transcript = append(m.transcript, tline{kind: lineNotice, text: "이 프로젝트의 세션이 없습니다. /new 로 시작하세요"})
 		return m, nil
 
 	case usageMsg:
@@ -181,8 +182,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.tokens = int(msg.prompt + msg.completion)
-		m.transcript = append(m.transcript, tline{lineNotice,
-			fmt.Sprintf("세션 토큰 사용량 — 프롬프트 %d + 완성 %d = %d", msg.prompt, msg.completion, msg.prompt+msg.completion)})
+		m.transcript = append(m.transcript, tline{kind: lineNotice,
+			text: fmt.Sprintf("세션 토큰 사용량 — 프롬프트 %d + 완성 %d = %d", msg.prompt, msg.completion, msg.prompt+msg.completion)})
 		return m, nil
 
 	case actionDoneMsg:
@@ -194,13 +195,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case connectResultMsg:
 		if msg.err != nil {
 			m.connected = false
-			m.transcript = append(m.transcript, tline{lineError, "연결 실패: " + msg.err.Error()})
+			m.transcript = append(m.transcript, tline{kind: lineError, text: "연결 실패: " + msg.err.Error()})
 			return m, nil
 		}
 		m.client = msg.client
 		m.connected = true
 		saveServer(m.addr, m.token)
-		m.transcript = append(m.transcript, tline{lineNotice, "서버에 연결되었습니다"})
+		m.transcript = append(m.transcript, tline{kind: lineNotice, text: "서버에 연결되었습니다"})
 		return m, tea.Batch(m.client.readOne(), m.afterConnect())
 
 	case tea.KeyMsg:
@@ -209,8 +210,40 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return next, cmd
 		}
 		return m.updateKeys(msg)
+
+	case tea.MouseMsg:
+		switch msg.Button {
+		case tea.MouseButtonWheelUp:
+			m.scrollBy(m.widthToBody(), m.heightToBody(), -3)
+		case tea.MouseButtonWheelDown:
+			m.scrollBy(m.widthToBody(), m.heightToBody(), 3)
+		}
+		return m, nil
 	}
 	return m, nil
+}
+
+// widthToBody / heightToBody mirror viewMain's transcript area geometry.
+func (m Model) widthToBody() int {
+	if m.width <= 0 {
+		return 80
+	}
+	w := m.width - panelWidth(m.width) - 3
+	if w < 4 {
+		w = 4
+	}
+	return w
+}
+
+func (m Model) heightToBody() int {
+	if m.height <= 0 {
+		return 24
+	}
+	h := m.height - 6
+	if h < 4 {
+		h = 4
+	}
+	return h
 }
 
 // afterConnect pulls role, machines and sessions after a fresh connection.
@@ -255,6 +288,14 @@ func (m Model) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	switch msg.Type {
+	case tea.KeyPgUp:
+		m.scrollBy(m.widthToBody(), m.heightToBody(), -5)
+		return m, nil
+	case tea.KeyPgDown:
+		m.scrollBy(m.widthToBody(), m.heightToBody(), 5)
+		return m, nil
+	}
 	if msg.Type == tea.KeyCtrlC {
 		// clear the input line; quitting is /exit
 		m.msgIn.SetValue("")
@@ -287,11 +328,11 @@ func (m Model) runCommand(raw string) (tea.Model, tea.Cmd) {
 		if line == "." {
 			line = "continue"
 		}
-		m.transcript = append(m.transcript, tline{lineUser, line})
+		m.transcript = append(m.transcript, tline{kind: lineUser, text: line})
 		m.msgIn.SetValue("")
 		m.notice = ""
 		if m.client == nil {
-			m.transcript = append(m.transcript, tline{lineError, "서버에 연결되어 있지 않습니다. /server 로 연결하세요."})
+			m.transcript = append(m.transcript, tline{kind: lineError, text: "서버에 연결되어 있지 않습니다. /server 로 연결하세요."})
 			return m, nil
 		}
 		return m, sendCmd(m.client, protocol.ClientMsg{Type: protocol.MsgSend, Text: line})

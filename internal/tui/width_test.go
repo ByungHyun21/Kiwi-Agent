@@ -15,10 +15,10 @@ func TestPanelWidthBounded(t *testing.T) {
 		m2.project = "kiwi_test"
 		m2.model = "Qwen3.5-9B"
 		m2.transcript = append(m2.transcript,
-			tline{lineUser, "index.html에 제목이 Kiwi Test인 심플한 랜딩 페이지를 만들어줘. 헤더, 소개 문단, 푸터 포함."},
-			tline{lineTool, `write_file {"path":"index.html","content":"<!DOCTYPE html>..."}`},
-			tline{lineResult, "index.html 생성됨 (2453 bytes)"},
-			tline{lineAssistant, "완성했습니다. 확인해보시면 원하는 페이지가 완성되어 있을 것입니다!"},
+			tline{kind: lineUser, text: "index.html에 제목이 Kiwi Test인 심플한 랜딩 페이지를 만들어줘. 헤더, 소개 문단, 푸터 포함."},
+			tline{kind: lineTool, text: `write_file {"path":"index.html","content":"<!DOCTYPE html>..."}`},
+			tline{kind: lineResult, text: "index.html 생성됨 (2453 bytes)"},
+			tline{kind: lineAssistant, text: "완성했습니다. 확인해보시면 원하는 페이지가 완성되어 있을 것입니다!"},
 		)
 		view := m2.View()
 		lines := strings.Split(view, "\n")
