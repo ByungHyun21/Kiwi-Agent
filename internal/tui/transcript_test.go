@@ -148,3 +148,21 @@ func TestNewClearsTranscript(t *testing.T) {
 		t.Fatal("scroll not reset to follow")
 	}
 }
+
+func TestSendClearsInput(t *testing.T) {
+	m := New()
+	mm, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+	m2 := mm.(Model)
+	m2.client = &wsClient{} // connected; the Cmd is never run here
+
+	next, _ := m2.runCommand("어디까지 이야기했었지?")
+	got := next.(Model)
+	if got.msgIn.Value() != "" {
+		t.Fatalf("input kept %q after send", got.msgIn.Value())
+	}
+	// a second Enter on the now-empty input must not resend
+	again, _ := got.runCommand(got.msgIn.Value())
+	if len(again.(Model).transcript) != len(got.transcript) {
+		t.Fatal("empty resubmit appended another user line")
+	}
+}

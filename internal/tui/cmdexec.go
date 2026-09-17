@@ -55,6 +55,7 @@ func (m Model) sendMessage(text string) (tea.Model, tea.Cmd) {
 		text = "continue"
 	}
 	m.transcript = append(m.transcript, tline{kind: lineUser, text: text})
+	m.msgIn.SetValue("")
 	m.notice = ""
 	if m.client == nil {
 		m.transcript = append(m.transcript, tline{kind: lineError, text: "서버에 연결되어 있지 않습니다. /server 로 연결하세요."})
