@@ -41,6 +41,7 @@ templ Layout(title string, active string) {
 				<nav class="nav" hx-boost="true">
 					@navItem("/", "대시보드", "dashboard", active)
 					@navItem("/machines", "기기", "machines", active)
+					@navItem("/projects", "프로젝트", "projects", active)
 					@navItem("/settings", "설정", "settings", active)
 					@navItem("/docs", "자료", "docs", active)
 				</nav>

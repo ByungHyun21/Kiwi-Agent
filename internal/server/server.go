@@ -46,6 +46,9 @@ func (s *Server) routes() {
 	// pages
 	s.mux.HandleFunc("GET /{$}", page(web.Dashboard()))
 	s.mux.HandleFunc("GET /machines", s.machinesPage)
+	s.mux.HandleFunc("GET /projects", s.projectsPage)
+	s.mux.HandleFunc("GET /projects/{id}", s.projectPage)
+	s.mux.HandleFunc("GET /sessions/{id}", s.sessionPage)
 	s.mux.HandleFunc("GET /settings", s.settingsPage)
 	s.mux.HandleFunc("GET /docs", page(web.Docs()))
 	s.mux.Handle("GET /static/", http.StripPrefix("/static/", web.Static()))

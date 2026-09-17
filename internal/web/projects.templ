@@ -1,0 +1,154 @@
+package web
+
+import (
+	"time"
+
+	"github.com/ByungHyun21/Kiwi-Agent/internal/protocol"
+)
+
+// UIMessage is one rendered history entry of a session.
+type UIMessage struct {
+	Role    string
+	Content string
+	Tools   string
+}
+
+func roleLabel(role string) string {
+	switch role {
+	case "user":
+		return "사용자"
+	case "assistant":
+		return "응답"
+	case "tool":
+		return "도구 결과"
+	case "system":
+		return "시스템"
+	}
+	return role
+}
+
+func fmtTime(t time.Time) string {
+	if t.IsZero() {
+		return "—"
+	}
+	return t.Format("2006-01-02 15:04")
+}
+
+templ ProjectsList(projects []protocol.Project) {
+	@Layout("프로젝트", "projects") {
+		<header class="page-head">
+			<h1>프로젝트</h1>
+			<p class="page-desc">등록된 프로젝트(작업 폴더)와 세션을 탐색합니다.</p>
+		</header>
+		<section class="panel">
+			<div class="panel-head">
+				<h2>프로젝트 목록</h2>
+			</div>
+			if len(projects) == 0 {
+				@EmptyState("등록된 프로젝트가 없습니다", "kiwi 에이전트에서 /project 로 만들거나 API 로 등록하세요.")
+			} else {
+				<table class="table">
+					<thead>
+						<tr>
+							<th>이름</th>
+							<th>기기</th>
+							<th>작업 폴더</th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, p := range projects {
+							<tr>
+								<td><a class="link" href={ templ.URL("/projects/" + fmtInt(p.ID)) }>{ p.Name }</a></td>
+								<td>{ p.Machine }</td>
+								<td class="mono">{ p.Workdir }</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			}
+		</section>
+	}
+}
+
+templ ProjectDetail(p protocol.Project, sessions []protocol.SessionInfo) {
+	@Layout(p.Name, "projects") {
+		<header class="page-head">
+			<div>
+				<h1>{ p.Name }</h1>
+				<p class="page-desc"><span class="mono">{ p.Workdir }</span> · 기기 { p.Machine }</p>
+			</div>
+			<a class="link" href="/projects">← 프로젝트 목록</a>
+		</header>
+		<section class="panel">
+			<div class="panel-head">
+				<h2>세션</h2>
+			</div>
+			if len(sessions) == 0 {
+				@EmptyState("세션이 없습니다", "kiwi 에이전트에서 이 프로젝트를 열고 대화를 시작하면 세션이 생성됩니다.")
+			} else {
+				<table class="table">
+					<thead>
+						<tr>
+							<th>이름</th>
+							<th>갱신</th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, s := range sessions {
+							<tr>
+								<td><a class="link" href={ templ.URL("/sessions/" + s.ID) }>{ s.Name }</a></td>
+								<td>{ fmtTime(s.UpdatedAt) }</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			}
+		</section>
+	}
+}
+
+templ SessionDetail(projectName string, s protocol.SessionInfo, msgs []UIMessage) {
+	@Layout(s.Name+" 세션", "projects") {
+		<header class="page-head">
+			<div>
+				<h1>{ s.Name }</h1>
+				<p class="page-desc">프로젝트 { projectName } · 갱신 { fmtTime(s.UpdatedAt) }</p>
+			</div>
+			<a class="link" href="/projects">← 프로젝트 목록</a>
+		</header>
+		<section class="panel">
+			<div class="panel-head">
+				<h2>대화 기록</h2>
+			</div>
+			if len(msgs) == 0 {
+				@EmptyState("메시지가 없습니다", "")
+			} else {
+				<div class="msgs">
+					for _, m := range msgs {
+						<div class="msg msg-{ m.Role }">
+							<span class="msg-role">{ roleLabel(m.Role) }</span>
+							if m.Tools != "" {
+								<pre class="msg-tools">{ m.Tools }</pre>
+							}
+							<pre class="msg-content">{ m.Content }</pre>
+						</div>
+					}
+				</div>
+			}
+		</section>
+	}
+}
+
+func fmtInt(i int64) string {
+	if i == 0 {
+		return "0"
+	}
+	var buf [20]byte
+	pos := len(buf)
+	for i > 0 {
+		pos--
+		buf[pos] = byte('0' + i%10)
+		i /= 10
+	}
+	return string(buf[pos:])
+}
