@@ -1,31 +1,61 @@
 package web
 
-templ Machines() {
+import "github.com/ByungHyun21/Kiwi-Agent/internal/protocol"
+
+templ machineRow(m protocol.Machine) {
+	<tr>
+		<td>{ m.Name }</td>
+		<td class="mono">{ m.User + "@" + m.Host }</td>
+		<td>
+			if m.State == "connected" {
+				<span class="chip chip-ok">{ m.State }</span>
+			} else if m.State == "disconnected" {
+				<span class="chip chip-bad">{ m.State }</span>
+			} else {
+				<span class="chip">{ m.State }</span>
+			}
+		</td>
+		<td>
+			if m.LastSeen.IsZero() {
+				—
+			} else {
+				{ m.LastSeen.Format("2006-01-02 15:04") }
+			}
+		</td>
+	</tr>
+}
+
+templ Machines(machines []protocol.Machine) {
 	@Layout("기기", "machines") {
 		<header class="page-head">
 			<div>
 				<h1>기기</h1>
 				<p class="page-desc">SSH로 접속해 실제 작업(파일·셸)이 실행되는 원격 PC를 등록합니다.</p>
 			</div>
-			<button class="btn" type="button">기기 등록</button>
 		</header>
 		<section class="panel">
 			<div class="panel-head">
 				<h2>등록된 기기</h2>
 			</div>
-			<table class="table">
-				<thead>
-					<tr>
-						<th>이름</th>
-						<th>호스트</th>
-						<th>상태</th>
-						<th>마지막 확인</th>
-					</tr>
-				</thead>
-				<tbody>
-				</tbody>
-			</table>
-			@EmptyState("등록된 기기가 없습니다", "작업 기기에는 sshd 와 kiwi 가 설치되어 있어야 합니다.")
+			if len(machines) == 0 {
+				@EmptyState("등록된 기기가 없습니다", "API POST /api/machines 또는 kiwi /server 메뉴로 등록하세요.")
+			} else {
+				<table class="table">
+					<thead>
+						<tr>
+							<th>이름</th>
+							<th>호스트</th>
+							<th>상태</th>
+							<th>마지막 확인</th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, m := range machines {
+							@machineRow(m)
+						}
+					</tbody>
+				</table>
+			}
 		</section>
 	}
 }

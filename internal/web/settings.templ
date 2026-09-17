@@ -1,42 +1,36 @@
 package web
 
-templ roleRow(role string, desc string) {
-	<tr>
-		<td>
-			<span class="role-name">{ role }</span>
-			<span class="role-desc">{ desc }</span>
-		</td>
-		<td>
-			<select class="input" disabled>
-				<option>공급자 없음</option>
-			</select>
-		</td>
-		<td>
-			<input class="input" type="text" placeholder="모델명"/>
-		</td>
-	</tr>
-}
-
-templ Settings() {
+templ Settings(token, provider, baseURL, model string) {
 	@Layout("설정", "settings") {
 		<header class="page-head">
 			<h1>설정</h1>
-			<p class="page-desc">모델 공급자와 역할 라우팅, 접근 토큰을 관리합니다. agent 에서도 수정하면 서버로 동기화됩니다.</p>
+			<p class="page-desc">모델 공급자·역할 라우팅·접근 토큰. agent 에서도 수정하면 서버로 동기화됩니다.</p>
 		</header>
 
 		<section class="panel">
 			<div class="panel-head">
 				<h2>모델 공급자</h2>
-				<button class="btn btn-ghost" type="button">공급자 추가</button>
 			</div>
-			@EmptyState("등록된 공급자가 없습니다", "llama.cpp · Ollama · OpenAI 등 OpenAI 호환 엔드포인트를 등록하세요.")
+			<table class="table">
+				<thead>
+					<tr>
+						<th>이름</th>
+						<th>엔드포인트</th>
+					</tr>
+				</thead>
+				<tbody>
+					<tr>
+						<td>{ provider }</td>
+						<td class="mono">{ baseURL }</td>
+					</tr>
+				</tbody>
+			</table>
 		</section>
 
 		<section class="panel">
 			<div class="panel-head">
 				<h2>역할 라우팅</h2>
 			</div>
-			<p class="panel-note">각 역할이 사용할 공급자와 모델을 지정합니다.</p>
 			<table class="table">
 				<thead>
 					<tr>
@@ -46,21 +40,22 @@ templ Settings() {
 					</tr>
 				</thead>
 				<tbody>
-					@roleRow("사서 (정제)", "수집된 자료를 정제·구조화")
-					@roleRow("OCR · 비전", "스캔본 PDF 인식")
-					@roleRow("임베딩", "자료 검색용 벡터 생성")
-					@roleRow("agent 채팅", "에이전트 대화 모델")
+					<tr>
+						<td>agent 채팅</td>
+						<td>{ provider }</td>
+						<td class="mono">{ model }</td>
+					</tr>
 				</tbody>
 			</table>
+			<p class="panel-note">변경은 API PUT /api/roles/agent-chat 으로 수행합니다.</p>
 		</section>
 
 		<section class="panel">
 			<div class="panel-head">
 				<h2>접근 토큰</h2>
-				<button class="btn btn-ghost" type="button">토큰 발급</button>
 			</div>
 			<div class="token-field">
-				<span class="token-value">발급된 토큰이 없습니다</span>
+				<span class="token-value mono">{ token }</span>
 			</div>
 			<p class="panel-note">kiwi 에이전트 첫 실행 시 서버 주소와 함께 이 토큰을 입력합니다.</p>
 		</section>

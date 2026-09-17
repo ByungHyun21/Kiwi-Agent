@@ -7,25 +7,6 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// conversation renders sent messages in the left area, bottom-aligned.
-func (m Model) conversation(width, height int) string {
-	if len(m.messages) == 0 || height <= 0 {
-		return lipgloss.NewStyle().Width(width).Height(height).Render("")
-	}
-	visible := m.messages
-	if len(visible) > height {
-		visible = visible[len(visible)-height:]
-	}
-	lines := make([]string, 0, height)
-	for range height - len(visible) {
-		lines = append(lines, "")
-	}
-	for _, msg := range visible {
-		lines = append(lines, truncate(msg, width))
-	}
-	return strings.Join(lines, "\n")
-}
-
 // rightPanel renders the sidebar content without a box: it sits right of a
 // vertical rule that spans from the top of the window to the input divider.
 func (m Model) rightPanel(height, width int) string {

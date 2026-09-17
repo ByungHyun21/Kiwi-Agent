@@ -169,52 +169,45 @@ func TestQueueAliasSurfacesCommand(t *testing.T) {
 func TestDotSendsContinue(t *testing.T) {
 	m := sized(t, 100, 30)
 	m2 := submit(m, ".")
-	if len(m2.messages) != 1 || m2.messages[0] != "continue" {
-		t.Fatalf("messages = %v, want [continue]", m2.messages)
+	if len(m2.transcript) != 2 || m2.transcript[0].text != "continue" {
+		t.Fatalf("transcript = %+v", m2.transcript)
 	}
 	if !strings.Contains(m2.View(), "continue") {
-		t.Fatal("sent message not rendered in conversation area")
+		t.Fatal("sent message not rendered in transcript")
 	}
 }
 
 func TestPlainMessageRendered(t *testing.T) {
 	m := sized(t, 100, 30)
 	m2 := submit(m, "회로도 검토해줘")
-	if len(m2.messages) != 1 || m2.messages[0] != "회로도 검토해줘" {
-		t.Fatalf("messages = %v", m2.messages)
+	if len(m2.transcript) != 2 || m2.transcript[0].text != "회로도 검토해줘" {
+		t.Fatalf("transcript = %+v", m2.transcript)
+	}
+	if !strings.Contains(m2.View(), "회로도 검토해줘") {
+		t.Fatal("message not rendered")
 	}
 }
 
-func TestServerCommandNoticePlacement(t *testing.T) {
+func TestServerMenuOpens(t *testing.T) {
 	m := sized(t, 100, 30)
 	m2 := submit(m, "/server")
-	view := m2.View()
-
-	lines := strings.Split(view, "\n")
-	noticeAt := -1
-	for i, l := range lines {
-		if strings.Contains(l, "사용법: /server") {
-			noticeAt = i
-			break
-		}
+	if m2.menu == nil || m2.menu.title != "서버" {
+		t.Fatal("bare /server should open the server menu")
 	}
-	if noticeAt < 0 {
-		t.Fatal("usage notice missing for bare /server")
-	}
-	if noticeAt+1 >= len(lines) || !strings.Contains(lines[noticeAt+1], "/exit") {
-		t.Fatalf("notice at line %d is not directly above help line", noticeAt)
+	if !strings.Contains(m2.View(), "연결") {
+		t.Fatal("server menu missing connect item")
 	}
 }
 
 func TestAddressNeverDisplayed(t *testing.T) {
 	m := sized(t, 100, 30)
-	m2 := submit(m, "/server 192.168.125.129:5494")
+	m2 := submit(m, "/server 192.168.125.129:5494 mytoken")
 	view := m2.View()
 	if strings.Contains(view, "192.168") {
 		t.Fatal("server address leaked into view")
 	}
-	if m2.addr != "192.168.125.129:5494" {
-		t.Fatalf("address not stored: %q", m2.addr)
+	if m2.addr != "192.168.125.129:5494" || m2.token != "mytoken" {
+		t.Fatalf("address/token not stored: %q %q", m2.addr, m2.token)
 	}
 }
 
