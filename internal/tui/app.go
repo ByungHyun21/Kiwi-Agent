@@ -63,17 +63,22 @@ var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "�
 // New returns the initial model, starting directly at the main screen.
 // The language preference is loaded from disk.
 func New() Model {
-	lang := loadLang()
+	cfg := loadConfig()
 	m := textinput.New()
-	m.Placeholder = translations[lang].Placeholder
+	m.Placeholder = translations[Lang(cfg.Language)].Placeholder
 	m.Prompt = "> "
 	m.CharLimit = 4000
 	m.Focus()
-	return Model{msgIn: m, lang: lang}
+	return Model{msgIn: m, lang: Lang(cfg.Language), addr: cfg.Server, token: cfg.Token}
 }
 
-// Init implements tea.Model.
-func (m Model) Init() tea.Cmd { return textinput.Blink }
+// Init implements tea.Model. Auto-connects when a server is configured.
+func (m Model) Init() tea.Cmd {
+	if m.addr != "" && m.token != "" {
+		return tea.Batch(textinput.Blink, dialServer(m.addr, m.token))
+	}
+	return textinput.Blink
+}
 
 // Run starts the kiwi terminal client.
 func Run() error {
@@ -194,6 +199,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.client = msg.client
 		m.connected = true
+		saveServer(m.addr, m.token)
 		m.transcript = append(m.transcript, tline{lineNotice, "서버에 연결되었습니다"})
 		return m, tea.Batch(m.client.readOne(), m.afterConnect())
 
