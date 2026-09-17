@@ -56,6 +56,8 @@ type Model struct {
 	height    int
 }
 
+func (m Model) hasServer() bool { return m.addr != "" }
+
 var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
 // New returns the initial model, starting directly at the main screen.
@@ -304,13 +306,24 @@ func (m Model) runCommand(raw string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.menu = menuServer(m.connected, m.machines)
+		if !m.hasServer() {
+			return m, nil
+		}
 		return m, fetchMachines(m.addr, m.token)
 	case "/project":
 		m.msgIn.SetValue("")
+		if !m.hasServer() {
+			m.notice = "먼저 /server 로 연결하세요"
+			return m, nil
+		}
 		m.menu = menuProjects(m.projects, m.project)
 		return m, fetchProjects(m.addr, m.token)
 	case "/model":
 		m.msgIn.SetValue("")
+		if !m.hasServer() {
+			m.notice = "먼저 /server 로 연결하세요"
+			return m, nil
+		}
 		m.menu = menuModels(nil, m.model)
 		return m, fetchModels(m.addr, m.token)
 	case "/goal":
