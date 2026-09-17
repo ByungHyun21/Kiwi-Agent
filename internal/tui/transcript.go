@@ -118,14 +118,27 @@ func (m *Model) applyEvent(ev protocol.Event) {
 		m.appendStream(lineAssistant, ev.Text)
 	case protocol.EvReasoning:
 		m.appendStream(lineReasoning, ev.Text)
+	case protocol.EvToolArgs:
+		if m.streamKind != int(lineTool) || m.toolArgsName != ev.Name {
+			m.toolArgsName = ev.Name
+			m.appendStream(lineTool, "⚒ "+ev.Name+" ")
+		}
+		m.appendStream(lineTool, ev.Text)
 	case protocol.EvToolCall:
+		m.curTool = ev.Name
+		if m.streamKind == int(lineTool) && m.toolArgsName == ev.Name {
+			// arguments already streamed raw; the final call adds nothing
+			m.streamKind = -1
+			break
+		}
 		args := ev.Args
 		if len(args) > 120 {
 			args = args[:120] + "…"
 		}
-		m.transcript = append(m.transcript, tline{kind: lineTool, text: ev.Name + " " + args})
+		m.transcript = append(m.transcript, tline{kind: lineTool, text: "⚒ " + ev.Name + " " + args})
 		m.streamKind = -1
 	case protocol.EvToolResult:
+		m.curTool = ""
 		m.transcript = append(m.transcript, tline{kind: lineResult, text: ev.Result})
 		m.streamKind = -1
 	case protocol.EvError:

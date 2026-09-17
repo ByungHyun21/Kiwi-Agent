@@ -108,10 +108,13 @@ func (a *Agent) Turn(ctx context.Context, sessionID, userText string) error {
 			msgs = append(msgs, msg)
 		}
 
-		resp, err := a.LLM.StreamChat(ctx, msgs, agentTools, func(kind, text string) {
-			if kind == "reasoning" {
+		resp, err := a.LLM.StreamChat(ctx, msgs, agentTools, func(kind, name, text string) {
+			switch kind {
+			case "reasoning":
 				a.emit(protocol.Event{Type: protocol.EvReasoning, Text: text})
-			} else {
+			case "tool_args":
+				a.emit(protocol.Event{Type: protocol.EvToolArgs, Name: name, Text: text})
+			default:
 				a.emit(protocol.Event{Type: protocol.EvDelta, Text: text})
 			}
 		})
@@ -208,7 +211,8 @@ func (a *Agent) toolWrite(ctx context.Context, rel, content string) string {
 		return "오류 (" + res.Code + "): " + res.Message
 	}
 	if oldText == "" {
-		return fmt.Sprintf("%s 생성됨 (%d bytes)", rel, len(content))
+		// new file: the diff IS the full raw content
+		return UnifiedDiff(rel, "", content)
 	}
 	return rel + " 수정됨\n" + UnifiedDiff(rel, oldText, content)
 }

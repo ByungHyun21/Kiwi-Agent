@@ -137,7 +137,8 @@ func TestTurnWritesFileThroughTools(t *testing.T) {
 		case protocol.EvToolCall:
 			sawCall = e.Name == "write_file"
 		case protocol.EvToolResult:
-			sawResult = strings.Contains(e.Result, "생성됨")
+			// new-file writes show the full content as a diff
+			sawResult = strings.Contains(e.Result, "+++ index.html") && strings.Contains(e.Result, "+ <html>")
 		}
 	}
 	if !sawReasoning || !sawDelta || !sawCall || !sawResult {

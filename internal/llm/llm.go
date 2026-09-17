@@ -96,7 +96,7 @@ func New(baseURL, apiKey, model string) *Client {
 // StreamChat calls chat/completions with stream=true, invoking onDelta for
 // every reasoning ("reasoning") and content ("content") chunk, and returns
 // the assembled response.
-func (c *Client) StreamChat(ctx context.Context, msgs []Message, tools []Tool, onDelta func(kind, text string)) (*Response, error) {
+func (c *Client) StreamChat(ctx context.Context, msgs []Message, tools []Tool, onDelta func(kind, name, text string)) (*Response, error) {
 	body := map[string]any{
 		"model":          c.Model,
 		"messages":       convertMessages(msgs),
@@ -181,13 +181,13 @@ func (c *Client) StreamChat(ctx context.Context, msgs []Message, tools []Tool, o
 		if ch.Delta.ReasoningContent != "" {
 			out.Reasoning += ch.Delta.ReasoningContent
 			if onDelta != nil {
-				onDelta("reasoning", ch.Delta.ReasoningContent)
+				onDelta("reasoning", "", ch.Delta.ReasoningContent)
 			}
 		}
 		if ch.Delta.Content != "" {
 			out.Content += ch.Delta.Content
 			if onDelta != nil {
-				onDelta("content", ch.Delta.Content)
+				onDelta("content", "", ch.Delta.Content)
 			}
 		}
 		for _, tc := range ch.Delta.ToolCalls {
@@ -202,7 +202,12 @@ func (c *Client) StreamChat(ctx context.Context, msgs []Message, tools []Tool, o
 			if tc.Function.Name != "" {
 				call.Name = tc.Function.Name
 			}
-			call.Args += tc.Function.Arguments
+			if tc.Function.Arguments != "" {
+				call.Args += tc.Function.Arguments
+				if onDelta != nil {
+					onDelta("tool_args", call.Name, tc.Function.Arguments)
+				}
+			}
 		}
 	}
 	if err := scanner.Err(); err != nil {

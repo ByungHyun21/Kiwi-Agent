@@ -42,7 +42,7 @@ func TestStreamChatAssembles(t *testing.T) {
 
 	var reasoning, content string
 	resp, err := c.StreamChat(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil,
-		func(kind, text string) {
+		func(kind, name, text string) {
 			switch kind {
 			case "reasoning":
 				reasoning += text
@@ -94,5 +94,38 @@ func TestCompleteNonStream(t *testing.T) {
 	got, err := c.Complete(context.Background(), []Message{{Role: "user", Content: "요약해"}})
 	if err != nil || got != "요약 완료" {
 		t.Fatalf("complete = %q err=%v", got, err)
+	}
+}
+
+func TestStreamToolArgsDeltas(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fl := w.(http.Flusher)
+		for _, c := range []string{
+			`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"write_file","arguments":"{\"pa"}}]}}]}`,
+			`{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"th\":\"a.html\",\"content\":\"<h1>\"}"}}]}}]}`,
+			`{"choices":[{"delta":{},"finish_reason":"tool_calls"}]}`,
+		} {
+			w.Write([]byte("data: " + c + "\n\n"))
+			fl.Flush()
+		}
+	}))
+	defer srv.Close()
+	c := New(srv.URL+"/v1", "", "m")
+	var got string
+	resp, err := c.StreamChat(context.Background(), []Message{{Role: "user", Content: "x"}}, nil,
+		func(kind, name, text string) {
+			if kind == "tool_args" {
+				got += text
+				if name != "write_file" {
+					t.Fatalf("tool name = %q", name)
+				}
+			}
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != resp.ToolCalls[0].Args {
+		t.Fatalf("streamed args %q != assembled %q", got, resp.ToolCalls[0].Args)
 	}
 }

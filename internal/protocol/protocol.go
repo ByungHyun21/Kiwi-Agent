@@ -60,6 +60,7 @@ const (
 	EvDelta      = "delta"       // assistant content chunk (raw)
 	EvReasoning  = "reasoning"   // thinking content chunk (raw)
 	EvToolCall   = "tool_call"   // tool name + raw args
+	EvToolArgs   = "tool_args"   // streaming chunk of tool arguments
 	EvToolResult = "tool_result" // raw tool output
 	EvDone       = "done"        // turn finished
 	EvError      = "error"

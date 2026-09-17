@@ -259,7 +259,7 @@ func (c *conn) runBtw(text string) {
 			c.busy = false
 			c.mu.Unlock()
 		}()
-		_, err := agent.LLM.StreamChat(context.Background(), msgs, nil, func(kind, text string) {
+		_, err := agent.LLM.StreamChat(context.Background(), msgs, nil, func(kind, name, text string) {
 			if kind == "reasoning" {
 				c.send(protocol.Event{Type: protocol.EvReasoning, Text: text})
 			} else {

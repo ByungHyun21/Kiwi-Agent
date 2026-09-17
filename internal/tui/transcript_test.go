@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ByungHyun21/Kiwi-Agent/internal/protocol"
+
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -87,5 +89,37 @@ func TestAssistantMarkdownRenders(t *testing.T) {
 	}
 	if !strings.Contains(view, "첫 번째 항목") {
 		t.Fatal("bullet text missing")
+	}
+}
+
+func TestSpinnerVisibleWhileBusy(t *testing.T) {
+	m := New()
+	mm, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+	m2 := mm.(Model)
+	m2.applyEvent(protocol.Event{Type: protocol.EvStatus, Name: "working"})
+	m2.applyEvent(protocol.Event{Type: protocol.EvToolCall, Name: "write_file", Args: "{}"})
+	view := m2.View()
+	if !strings.Contains(view, "진행 중") || !strings.Contains(view, "write_file") {
+		t.Fatal("spinner with tool hint missing while busy")
+	}
+	if len(strings.Split(view, "\n")) != 24 {
+		t.Fatalf("busy frame height = %d, want 24", len(strings.Split(view, "\n")))
+	}
+
+	m2.applyEvent(protocol.Event{Type: protocol.EvToolResult, Result: "done"})
+	m2.applyEvent(protocol.Event{Type: protocol.EvStatus, Name: "idle"})
+	if strings.Contains(m2.View(), "진행 중") {
+		t.Fatal("spinner persisted after idle")
+	}
+}
+
+func TestMouseSequenceSanitized(t *testing.T) {
+	m := New()
+	mm, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+	m2 := mm.(Model)
+	m2.msgIn.SetValue("hello\x1b[<65;56;30Mworld")
+	m2.sanitizeInput()
+	if got := m2.msgIn.Value(); got != "helloworld" {
+		t.Fatalf("input = %q, want helloworld", got)
 	}
 }

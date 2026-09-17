@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -43,11 +44,13 @@ type Model struct {
 	machines       []protocol.Machine
 	wantProject    string
 
-	transcript []tline
-	streamKind int
-	scroll     int // -1 = follow bottom
-	busy       bool
-	spinner    int
+	transcript   []tline
+	streamKind   int
+	scroll       int    // -1 = follow bottom
+	curTool      string // tool currently executing (spinner hint)
+	toolArgsName string // name of the call whose args are streaming
+	busy         bool
+	spinner      int
 
 	notice    string
 	popupSel  int
@@ -313,9 +316,24 @@ func (m Model) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	var cmd tea.Cmd
 	m.msgIn, cmd = m.msgIn.Update(msg)
+	m.sanitizeInput()
 	m.popupGone = false
 	m.popupSel = m.clampPopupSel(len(m.candidates()))
 	return m, cmd
+}
+
+// mouseCSI matches SGR mouse reports that leaked into the input as text
+// when the sequence was split across reads and evaded the key parser,
+// with or without the leading escape byte.
+var mouseCSI = regexp.MustCompile("\x1b?\\[<[0-9;]*[Mm]")
+
+// sanitizeInput strips leaked mouse escape sequences from the input.
+func (m *Model) sanitizeInput() {
+	v := m.msgIn.Value()
+	if !strings.Contains(v, "[<") {
+		return
+	}
+	m.msgIn.SetValue(mouseCSI.ReplaceAllString(v, ""))
 }
 
 // runCommand executes a slash command or sends a plain message.
@@ -490,8 +508,12 @@ func (m Model) spinnerLine() string {
 	if !m.busy {
 		return ""
 	}
+	label := " 진행 중…"
+	if m.curTool != "" {
+		label = " 진행 중… ⚒ " + m.curTool
+	}
 	return lipgloss.NewStyle().Foreground(lipgloss.Color("#a8c17a")).Bold(true).
-		Render(spinnerFrames[m.spinner] + " 진행 중…")
+		Render(spinnerFrames[m.spinner] + label)
 }
 
 func (m Model) viewMain() string {
@@ -517,6 +539,9 @@ func (m Model) viewMain() string {
 	popupLines := lipgloss.Height(popup)
 
 	chrome := 6 + popupLines
+	if m.busy {
+		chrome++ // spinner line above the input
+	}
 	bodyHeight := m.height - chrome
 	if bodyHeight < 4 {
 		bodyHeight = 4
