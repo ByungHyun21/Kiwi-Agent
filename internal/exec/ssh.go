@@ -7,7 +7,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -220,6 +219,3 @@ func quote(s string) string {
 func protoErr(code, msg string) protocol.ExecResult {
 	return protocol.ExecResult{OK: false, Code: code, Message: msg}
 }
-
-// ErrNotInstalled reports the kiwi-missing condition.
-var ErrNotInstalled = errors.New("not-installed")

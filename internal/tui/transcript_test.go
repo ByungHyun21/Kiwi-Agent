@@ -27,7 +27,7 @@ func TestScrollShowsOlderContent(t *testing.T) {
 		_ = i
 	}
 	m := scrolled(t, entries...)
-	w, h := m.widthToBody(), m.heightToBody()
+	w, h := m.layoutOf().leftW, m.layoutOf().bodyH
 
 	bottom := m.renderTranscript(w, h)
 	if strings.Contains(bottom, "첫 줄") {
@@ -54,7 +54,7 @@ func TestStreamAppendOnlyRewrapsLastLine(t *testing.T) {
 	m2 := mm.(Model)
 	m2.appendStream(lineUser, "이전 사용자 메시지")
 	m2.appendStream(lineReasoning, "초기 사고 내용")
-	m2.renderTranscript(m2.widthToBody(), m2.heightToBody())
+	m2.renderTranscript(m2.layoutOf().leftW, m2.layoutOf().bodyH)
 	cached := m2.transcript[0].wrapped
 	if len(cached) == 0 {
 		t.Fatal("expected wrap cache")

@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"path"
-	"sort"
 	"strings"
 
 	"github.com/ByungHyun21/Kiwi-Agent/internal/exec"
@@ -350,14 +349,4 @@ func lcsDiff(a, b []string) []diffLine {
 		out = append(out, diffLine{'+', b[j]})
 	}
 	return out
-}
-
-// SortedKeys is a small helper kept for deterministic setting output.
-func SortedKeys(m map[string]string) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
 }
