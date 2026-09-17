@@ -5,7 +5,7 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/ByungHyun21/Kiwi-Agent/internal/web"
+	"github.com/ByungHyun21/Kiwi-Agent/internal/server"
 )
 
 func main() {
@@ -13,5 +13,5 @@ func main() {
 	flag.Parse()
 
 	log.Printf("kiwi-server listening on http://localhost%s", *addr)
-	log.Fatal(http.ListenAndServe(*addr, web.Routes()))
+	log.Fatal(http.ListenAndServe(*addr, server.New().Handler()))
 }
