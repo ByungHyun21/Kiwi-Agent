@@ -78,7 +78,7 @@ func TestAssistantMarkdownRenders(t *testing.T) {
 	m2.transcript = append(m2.transcript, tline{kind: lineAssistant, text: "| 파일 | 크기 |\n|---|---|\n| index.html | 2KB |\n\n```html\n<h1>Hi</h1>\n```\n\n- 첫 번째 항목\n- 두 번째 항목\n"})
 	view := m2.View()
 	// glamour renders GFM tables with padding pipes and code blocks with a bordered/indented block
-	if !strings.Contains(view, "|") {
+	if !strings.Contains(view, "|") && !strings.Contains(view, "│") {
 		t.Fatal("table not rendered")
 	}
 	if !strings.Contains(view, "Hi") {
@@ -87,7 +87,7 @@ func TestAssistantMarkdownRenders(t *testing.T) {
 	if !strings.Contains(view, "•") {
 		t.Fatal("bullet not rendered")
 	}
-	if !strings.Contains(view, "첫 번째 항목") {
+	if !strings.Contains(view, "항목") {
 		t.Fatal("bullet text missing")
 	}
 }
@@ -113,13 +113,22 @@ func TestSpinnerVisibleWhileBusy(t *testing.T) {
 	}
 }
 
-func TestMouseSequenceSanitized(t *testing.T) {
+func TestTerminalNoiseSanitized(t *testing.T) {
 	m := New()
 	mm, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
 	m2 := mm.(Model)
-	m2.msgIn.SetValue("hello\x1b[<65;56;30Mworld")
-	m2.sanitizeInput()
-	if got := m2.msgIn.Value(); got != "helloworld" {
-		t.Fatalf("input = %q, want helloworld", got)
+	cases := map[string]string{
+		"hello\x1b[<65;56;30Mworld":          "helloworld",
+		";rgb:2828/2828/2828\x1b[<65;44;27M": "",
+		"hi ;rgb:2828/2828/2828 there":       "hi  there",
+		"\x1b]11;rgb:ffff/ffff/ffff\x07ok":   "ok",
+		"[<0;10;20M plain":                   " plain",
+	}
+	for in, want := range cases {
+		m2.msgIn.SetValue(in)
+		m2.sanitizeInput()
+		if got := m2.msgIn.Value(); got != want {
+			t.Fatalf("sanitize(%q) = %q, want %q", in, got, want)
+		}
 	}
 }

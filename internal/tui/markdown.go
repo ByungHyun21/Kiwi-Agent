@@ -19,7 +19,7 @@ func mdRenderer(width int) *glamour.TermRenderer {
 	if r, ok := mdRenderers[width]; ok {
 		return r
 	}
-	r, err := glamour.NewTermRenderer(glamour.WithAutoStyle(), glamour.WithWordWrap(width))
+	r, err := glamour.NewTermRenderer(glamour.WithStandardStyle("dark"), glamour.WithWordWrap(width))
 	if err != nil {
 		return nil
 	}
