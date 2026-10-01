@@ -1,0 +1,45 @@
+# Secrets
+.env
+.env.*
+*.pem
+*.key
+
+# Dependencies
+node_modules/
+
+# Build output (bun build --compile)
+/kiwi
+/kiwi-server
+bin/
+dist/
+
+# Testing / coverage
+coverage/
+*.lcov
+
+# Databases / artifacts
+*.sqlite
+*.sqlite3
+*.db
+data/cache/
+logs/
+*.log
+
+# Model / runtime artifacts
+models/
+.cache/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Local-only files (agent config, internal docs/plans)
+AGENTS.md
+docs/
+plans/
+
+# OS
+.DS_Store
+Thumbs.db
