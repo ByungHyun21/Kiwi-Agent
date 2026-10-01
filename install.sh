@@ -52,25 +52,32 @@ if command -v curl >/dev/null 2>&1; then
   fi
 fi
 
-# 2) Build from source with Bun (>= 1.4 required: bun.lock format v2)
+# 2) Build from source with Bun
 if command -v bun >/dev/null 2>&1; then
-  bun_ver=$(bun --version 2>/dev/null || echo 0)
-  bun_major=$(echo "$bun_ver" | cut -d. -f1)
-  bun_minor=$(echo "$bun_ver" | cut -d. -f2)
-  if [ "$bun_major" -lt 1 ] || { [ "$bun_major" -eq 1 ] && [ "$bun_minor" -lt 4 ]; }; then
-    err "Bun >= 1.4 required (found $bun_ver). Upgrade first:
-       curl -fsSL https://bun.sh/install | bash"
-  fi
   say "no prebuilt release for ${os}/${arch}; building from source with Bun"
   src=$(mktemp -d)
   trap 'rm -rf "$src"' EXIT
   git clone --depth 1 "https://github.com/$REPO" "$src/Kiwi-Agent"
   cd "$src/Kiwi-Agent"
-  bun install --frozen-lockfile
+  # Bun >= 1.4 understands the committed lockfile (lockfileVersion 2);
+  # older Bun ignores it and resolves from package.json, so only freeze
+  # the install when the lockfile can actually be read.
+  bun_ver=$(bun --version 2>/dev/null || echo 0)
+  bun_major=$(echo "$bun_ver" | cut -d. -f1)
+  bun_minor=$(echo "$bun_ver" | cut -d. -f2)
+  frozen=yes
+  [ "$bun_major" -eq 1 ] && [ "$bun_minor" -lt 4 ] && frozen=no
+  [ "$bun_major" -lt 1 ] && frozen=no
+  if [ "$frozen" = yes ]; then
+    bun install --frozen-lockfile
+  else
+    say "Bun $bun_ver detected; installing without the lockfile"
+    bun install
+  fi
   bun build --compile --outfile "$INSTALL_DIR/$BIN" "src/$BIN.ts"
   say "installed $INSTALL_DIR/$BIN"
   exit 0
 fi
 
 err "no release found for ${os}/${arch} and Bun is not installed.
-       Install Bun >= 1.4 from https://bun.sh and re-run this script."
+       Install Bun from https://bun.sh and re-run this script."
