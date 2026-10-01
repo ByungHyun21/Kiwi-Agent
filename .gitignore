@@ -12,6 +12,7 @@ node_modules/
 /kiwi-server
 bin/
 dist/
+dist-release/
 
 # Testing / coverage
 coverage/
