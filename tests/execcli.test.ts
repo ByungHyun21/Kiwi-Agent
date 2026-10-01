@@ -4,7 +4,7 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { run } from "../src/execcli.ts";
+import { run, Version } from "../src/execcli.ts";
 
 const dir = mkdtempSync(path.join(os.tmpdir(), "kiwi-exec-"));
 process.chdir(dir);
@@ -76,7 +76,8 @@ describe("kiwi exec", () => {
   test("info reports version and platform", async () => {
     const { res } = await exec(["info"]);
     const info = JSON.parse(res.data as string) as Record<string, string>;
-    expect(info.version).toBe("dev");
+    expect(info.version).toBe(Version);
+    expect(info.version).toMatch(/^\d+\.\d+\.\d+$/);
     expect(info.os).toBeTypeOf("string");
     expect(info.arch).toBeTypeOf("string");
   });

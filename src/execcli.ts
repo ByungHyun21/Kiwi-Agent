@@ -4,10 +4,11 @@
 import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { VERSION } from "./updater.ts";
 import type { ExecResult } from "./protocol.ts";
 
 /** Version is reported by the info command. */
-export const Version = "dev";
+export const Version = VERSION;
 
 /** Run executes one kiwi exec subcommand. argv excludes the leading "exec".
  *  Always prints exactly one ExecResult JSON on stdout; returns the exit code. */
