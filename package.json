@@ -1,0 +1,18 @@
+{
+  "name": "kiwi-agent",
+  "version": "0.1.0",
+  "description": "A self-hosted coding agent for your local network (TypeScript rewrite)",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "kiwi": "bun run src/kiwi.ts",
+    "kiwi-server": "bun run src/kiwi-server.ts",
+    "build": "bun build --compile --outfile kiwi src/kiwi.ts && bun build --compile --outfile kiwi-server src/kiwi-server.ts",
+    "test": "bun test"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.2",
+    "typescript": "^7.0.2"
+  }
+}
