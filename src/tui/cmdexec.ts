@@ -19,6 +19,7 @@ import {
 import { MenuAction, menuGoal, menuModels, menuProjects, menuServer, menuSessions } from "./menu.ts";
 import { saveLang } from "./config.ts";
 import { langNames, validLang } from "./lang.ts";
+import { selfUpdate } from "../updater.ts";
 import type { Model } from "./model.ts";
 import type { Cmd } from "./term.ts";
 
@@ -72,6 +73,8 @@ export function runCommand(m: Model, raw: string): Cmd[] {
       return cmdUsage(m);
     case "/language":
       return cmdLanguage(m, fields);
+    case "/update":
+      return cmdUpdate(m);
     default:
       // unlisted commands (init, skill, mcp, git, update…) are consumed quietly
       m.notice = "";
@@ -208,6 +211,25 @@ function cmdUsage(m: Model): Cmd[] {
     return [];
   }
   return orEmpty(fetchUsage(m.addr, m.token, m.currentSession));
+}
+
+function cmdUpdate(m: Model): Cmd[] {
+  m.notice = "업데이트 확인 중…";
+  void (async () => {
+    const res = await selfUpdate();
+    switch (res.status) {
+      case "updated":
+        m.notice = `${res.tag} 업데이트 완료 — /exit 후 다시 실행하면 적용됩니다`;
+        break;
+      case "failed":
+        m.notice = "업데이트 실패: " + res.reason;
+        break;
+      case "current":
+        m.notice = "이미 최신 버전입니다";
+        break;
+    }
+  })();
+  return [];
 }
 
 function cmdLanguage(m: Model, fields: string[]): Cmd[] {
