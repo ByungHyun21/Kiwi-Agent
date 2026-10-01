@@ -52,8 +52,15 @@ if command -v curl >/dev/null 2>&1; then
   fi
 fi
 
-# 2) Build from source with Bun
+# 2) Build from source with Bun (>= 1.4 required: bun.lock format v2)
 if command -v bun >/dev/null 2>&1; then
+  bun_ver=$(bun --version 2>/dev/null || echo 0)
+  bun_major=$(echo "$bun_ver" | cut -d. -f1)
+  bun_minor=$(echo "$bun_ver" | cut -d. -f2)
+  if [ "$bun_major" -lt 1 ] || { [ "$bun_major" -eq 1 ] && [ "$bun_minor" -lt 4 ]; }; then
+    err "Bun >= 1.4 required (found $bun_ver). Upgrade first:
+       curl -fsSL https://bun.sh/install | bash"
+  fi
   say "no prebuilt release for ${os}/${arch}; building from source with Bun"
   src=$(mktemp -d)
   trap 'rm -rf "$src"' EXIT
@@ -66,4 +73,4 @@ if command -v bun >/dev/null 2>&1; then
 fi
 
 err "no release found for ${os}/${arch} and Bun is not installed.
-       Install Bun from https://bun.sh and re-run this script."
+       Install Bun >= 1.4 from https://bun.sh and re-run this script."
