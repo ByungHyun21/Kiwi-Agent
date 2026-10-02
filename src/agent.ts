@@ -72,15 +72,28 @@ export class Agent {
       this.store.appendMessage(sessionID, stored);
 
       if (resp.toolCalls.length === 0) return;
-      for (const tc of resp.toolCalls) {
+      const calls = resp.toolCalls;
+      for (const tc of calls) {
         if (signal?.aborted) throw new DOMException("The operation was aborted.", "AbortError");
         this.emitEvent({ type: EvToolCall, name: tc.name, args: tc.args });
-        const result = await this.runTool(signal, tc);
-        this.emitEvent({ type: EvToolResult, name: tc.name, result });
-        this.store.appendMessage(sessionID, {
-          role: "tool", content: result, toolCallID: tc.id, name: tc.name,
-        });
       }
+      const parallelizable = calls.length > 1 && calls.every((tc) => READ_ONLY_TOOLS.has(tc.name));
+      const results: string[] = [];
+      if (parallelizable) {
+        const outs = await Promise.all(calls.map((tc) => this.runTool(signal, sessionID, tc)));
+        results.push(...outs);
+      } else {
+        for (const tc of calls) {
+          if (signal?.aborted) throw new DOMException("The operation was aborted.", "AbortError");
+          results.push(await this.runTool(signal, sessionID, tc));
+        }
+      }
+      calls.forEach((tc, i) => {
+        this.emitEvent({ type: EvToolResult, name: tc.name, result: results[i]! });
+        this.store.appendMessage(sessionID, {
+          role: "tool", content: results[i]!, toolCallID: tc.id, name: tc.name,
+        });
+      });
     }
     throw new Error(`최대 도구 반복 횟수(${maxIter}) 초과`);
   }
@@ -97,31 +110,98 @@ export class Agent {
   }
 
   /** runTool executes one tool call and returns the raw display text. */
-  private async runTool(signal: AbortSignal | undefined, tc: ToolCall): Promise<string> {
-    let args: { path?: string; content?: string };
+  private async runTool(signal: AbortSignal | undefined, sessionID: string, tc: ToolCall): Promise<string> {
+    let args: Record<string, unknown>;
     try {
-      args = JSON.parse(tc.args || "{}");
+      args = JSON.parse(tc.args || "{}") as Record<string, unknown>;
     } catch (err) {
       return "오류: 도구 인자가 잘못되었습니다: " + String(err);
     }
-    const p = args.path ?? "";
-    if (!safePath(p)) {
-      return "오류: 경로는 작업 폴더 안의 상대 경로여야 합니다: " + p;
-    }
+    const str = (k: string, def = ""): string => (typeof args[k] === "string" ? (args[k] as string) : def);
+    const int = (k: string): number | null => {
+      const n = typeof args[k] === "number" ? (args[k] as number) : parseInt(String(args[k] ?? ""), 10);
+      return Number.isFinite(n) && n > 0 ? n : null;
+    };
+    const p = str("path");
 
     switch (tc.name) {
-      case "write_file":
-        return this.toolWrite(signal, p, args.content ?? "");
+      case "write_file": {
+        if (!safePath(p)) return pathErr(p);
+        return this.toolWrite(signal, p, str("content"));
+      }
       case "read_file": {
+        if (!safePath(p)) return pathErr(p);
         const res = await this.runner.run(this.machine, this.workdir, ["read", p], null, signal);
         if (!res.ok) return `오류 (${res.code}): ${res.message}`;
         return res.data ?? "";
+      }
+      case "edit": {
+        if (!safePath(p)) return pathErr(p);
+        const rawEdits = Array.isArray(args.edits) ? (args.edits as { oldText?: unknown; newText?: unknown }[]) : [];
+        const edits = rawEdits.map((e) => ({ oldText: String(e.oldText ?? ""), newText: String(e.newText ?? "") }));
+        if (edits.length === 0) return "오류: edits 배열이 비어 있습니다";
+        const old = await this.runner.run(this.machine, this.workdir, ["read", p], null, signal);
+        const oldText = old.ok ? old.data ?? "" : "";
+        const res = await this.runner.run(this.machine, this.workdir, ["edit", p], new TextEncoder().encode(JSON.stringify({ edits })), signal);
+        if (!res.ok) return `오류 (${res.code}): ${res.message}`;
+        let newText = "";
+        try {
+          newText = ((JSON.parse(res.data ?? "{}") as { content?: string }).content) ?? "";
+        } catch {
+          // fall through with empty content
+        }
+        if (oldText === "") return unifiedDiff(p, "", newText);
+        return p + " 수정됨\n" + unifiedDiff(p, oldText, newText);
       }
       case "list_dir": {
         const argv = p ? ["ls", p] : ["ls"];
         const res = await this.runner.run(this.machine, this.workdir, argv, null, signal);
         if (!res.ok) return `오류 (${res.code}): ${res.message}`;
         return res.data ?? "";
+      }
+      case "grep": {
+        const pattern = str("pattern");
+        if (pattern === "") return "오류: pattern이 비어 있습니다";
+        const argv = ["grep", pattern];
+        const include = str("include");
+        if (include !== "") argv.push("--include", include);
+        argv.push(p !== "" && safePath(p) ? p : ".");
+        const res = await this.runner.run(this.machine, this.workdir, argv, null, signal);
+        if (!res.ok) return `오류 (${res.code}): ${res.message}`;
+        return res.data ?? "";
+      }
+      case "glob": {
+        const pattern = str("pattern");
+        if (pattern === "") return "오류: pattern이 비어 있습니다";
+        const res = await this.runner.run(this.machine, this.workdir, ["glob", pattern, p !== "" && safePath(p) ? p : "."], null, signal);
+        if (!res.ok) return `오류 (${res.code}): ${res.message}`;
+        return res.data ?? "";
+      }
+      case "run": {
+        const argv = tokenize(str("command"));
+        if (argv.length === 0) return "오류: command가 비어 있습니다";
+        const timeoutMs = int("timeoutMs");
+        const res = await this.runner.run(this.machine, this.workdir,
+          ["run", ...(timeoutMs ? ["--timeout", String(Math.min(timeoutMs, 600_000))] : []), ...argv], null, signal);
+        if (!res.ok) return `오류 (${res.code}): ${res.message}\n${res.data ?? ""}`;
+        return res.data ?? "";
+      }
+      case "session_search": {
+        const rows = this.store.searchMessages(str("query"), int("limit") ?? 10);
+        if (rows.length === 0) return "(검색 결과 없음)";
+        return rows.map((r) => `${r.sessionId} [${r.role}] ${r.snippet.replaceAll("\n", " ")}`).join("\n");
+      }
+      case "session_read": {
+        const sid = str("sessionId") || sessionID;
+        let msgs;
+        try {
+          msgs = this.store.messages(sid);
+        } catch {
+          return "오류: 세션을 찾을 수 없습니다: " + sid;
+        }
+        const tail = msgs.slice(-(int("limit") ?? 20));
+        if (tail.length === 0) return "(메시지 없음)";
+        return tail.map((m) => `${m.role}: ${m.content.slice(0, 500)}`).join("\n");
       }
       default:
         return "오류: 알 수 없는 도구: " + tc.name;
@@ -191,7 +271,12 @@ export class Agent {
   }
 }
 
-const systemPrompt = `당신은 코딩 에이전트입니다. 도구로 작업 폴더의 파일을 만들고, 읽고, 목록합니다. 파일 경로는 작업 폴더 기준 상대 경로입니다.`;
+const systemPrompt = `당신은 코딩 에이전트입니다. 도구로 작업 폴더의 파일을 만들고, 읽고, 수정하고, 검색하고, 셸 명령을 실행합니다. 파일 경로는 작업 폴더 기준 상대 경로입니다.
+- 파일 일부 수정은 edit을 사용하세요 (전체 재작성 금지). oldText는 파일 내에 정확히 한 번 나타나야 합니다.
+- 코드 내용 검색은 grep, 파일명 검색은 glob을 사용하세요.
+- 빌드·테스트·실행은 run을 사용하세요 (command는 따옴표로 인자를 구분하는 명령 문자열).
+- 서로 의존하지 않는 읽기(read_file, list_dir, grep, glob, session_search, session_read)는 한 응답에 여러 개 함께 호출하면 병렬로 실행됩니다.
+- 과거 세션 기록은 session_search로 검색하고 session_read로 읽을 수 있습니다.`;
 
 /** SystemPrompt exposes the agent system prompt (used by side channels). */
 export function systemPromptText(): string {
@@ -201,7 +286,7 @@ export function systemPromptText(): string {
 const agentTools: Tool[] = [
   {
     name: "write_file",
-    description: "작업 폴더에 파일을 생성하거나 전체 내용을 덮어씁니다. 상대 경로를 사용하세요.",
+    description: "작업 폴더에 파일을 생성하거나 전체 내용을 덮어씁니다. 새 파일이나 전체 재작성 시에만 사용하세요.",
     parameters: {
       type: "object",
       properties: {
@@ -223,6 +308,29 @@ const agentTools: Tool[] = [
     },
   },
   {
+    name: "edit",
+    description: "파일의 일부를 문자열 치환으로 수정합니다. 각 oldText는 파일에서 정확히 한 번 나타나야 합니다.",
+    parameters: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "상대 경로" },
+        edits: {
+          type: "array",
+          description: "순서대로 적용할 치환 목록",
+          items: {
+            type: "object",
+            properties: {
+              oldText: { type: "string", description: "파일에서 찾을 유일한 텍스트" },
+              newText: { type: "string", description: "새 텍스트" },
+            },
+            required: ["oldText", "newText"],
+          },
+        },
+      },
+      required: ["path", "edits"],
+    },
+  },
+  {
     name: "list_dir",
     description: "작업 폴더(또는 하위 폴더)의 항목 목록을 봅니다.",
     parameters: {
@@ -232,7 +340,104 @@ const agentTools: Tool[] = [
       },
     },
   },
+  {
+    name: "grep",
+    description: "정규식으로 파일 내용을 검색합니다(rg 우선, grep 폴백). 결과는 파일:줄:내용 형식입니다.",
+    parameters: {
+      type: "object",
+      properties: {
+        pattern: { type: "string", description: "검색 패턴" },
+        include: { type: "string", description: "파일명 글롭 필터, 예: *.ts" },
+        path: { type: "string", description: "기본값: 작업 폴더 전체" },
+      },
+      required: ["pattern"],
+    },
+  },
+  {
+    name: "glob",
+    description: "파일명 패턴(예: **/*.py)으로 파일을 찾습니다. 최근 수정 순으로 최대 100건.",
+    parameters: {
+      type: "object",
+      properties: {
+        pattern: { type: "string" },
+        path: { type: "string", description: "기본값: 작업 폴더 루트" },
+      },
+      required: ["pattern"],
+    },
+  },
+  {
+    name: "run",
+    description: "작업 폴더에서 셸 명령을 실행합니다(빌드, 테스트, 실행 등). 명령은 직접 실행되며 경로 이동 없이 작업 폴더에서 시작됩니다.",
+    parameters: {
+      type: "object",
+      properties: {
+        command: { type: "string", description: "예: python3 gugudan.py" },
+        timeoutMs: { type: "number", description: "선택: 시간 제한(ms, 최대 600000). 기본 120000" },
+      },
+      required: ["command"],
+    },
+  },
+  {
+    name: "session_search",
+    description: "과거 세션을 포함한 모든 대화 기록을 전문 검색합니다.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: { type: "string" },
+        limit: { type: "number", description: "기본 10" },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    name: "session_read",
+    description: "세션 대화 기록을 읽습니다. sessionId 생략 시 현재 세션의 최근 메시지를 반환합니다.",
+    parameters: {
+      type: "object",
+      properties: {
+        sessionId: { type: "string", description: "기본값: 현재 세션" },
+        limit: { type: "number", description: "끝에서부터의 메시지 수, 기본 20" },
+      },
+    },
+  },
 ];
+
+const READ_ONLY_TOOLS = new Set(["read_file", "list_dir", "grep", "glob", "session_search", "session_read"]);
+
+function pathErr(p: string): string {
+  return "오류: 경로는 작업 폴더 안의 상대 경로여야 합니다: " + p;
+}
+
+/** tokenize splits a shell-like command string into argv, honoring quotes. */
+export function tokenize(s: string): string[] {
+  const out: string[] = [];
+  let cur = "";
+  let quote: string | null = null;
+  let has = false;
+  for (const c of s) {
+    if (quote) {
+      if (c === quote) quote = null;
+      else cur += c;
+      continue;
+    }
+    if (c === '"' || c === "'") {
+      quote = c;
+      has = true;
+      continue;
+    }
+    if (c === " " || c === "\t") {
+      if (cur !== "" || has) {
+        out.push(cur);
+        cur = "";
+        has = false;
+      }
+      continue;
+    }
+    cur += c;
+  }
+  if (cur !== "" || has) out.push(cur);
+  return out;
+}
 
 /** safePath rejects absolute paths and traversal outside the workdir. */
 export function safePath(p: string): boolean {

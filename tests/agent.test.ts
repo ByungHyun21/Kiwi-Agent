@@ -1,7 +1,129 @@
-// Agent core tests: diff, path safety.
+// Agent core tests: diff, path safety, tool execution.
 
 import { describe, expect, test } from "bun:test";
-import { lcsDiff, safePath, unifiedDiff } from "../src/agent.ts";
+import { mkdtempSync, rmSync } from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { Agent, lcsDiff, safePath, tokenize, unifiedDiff } from "../src/agent.ts";
+import { Store } from "../src/store.ts";
+import type { Client, Response, Tool, ToolCall } from "../src/llm.ts";
+import type { Runner } from "../src/ssh.ts";
+import type { ExecResult, Machine } from "../src/protocol.ts";
+
+describe("tokenize", () => {
+  test("splits on whitespace and honors quotes", () => {
+    expect(tokenize("python3 main.py")).toEqual(["python3", "main.py"]);
+    expect(tokenize('echo "hello world"')).toEqual(["echo", "hello world"]);
+    expect(tokenize("grep 'a b' file")).toEqual(["grep", "a b", "file"]);
+    expect(tokenize("  a   b  ")).toEqual(["a", "b"]);
+    expect(tokenize("")).toEqual([]);
+  });
+});
+
+class ScriptedLLM implements Client {
+  public calls = 0;
+  baseURL = "";
+  apiKey = "";
+  model = "";
+  constructor(private responses: Response[]) {}
+  async streamChat(): Promise<Response> {
+    const r = this.responses[this.calls] ?? { content: "done", reasoning: "", toolCalls: [], usage: { promptTokens: 1, completionTokens: 1 }, finish: "stop" };
+    this.calls++;
+    return r;
+  }
+  async complete(): Promise<string> {
+    return "요약";
+  }
+  async listModels(): Promise<string[]> {
+    return [];
+  }
+}
+
+function makeRunner(): Runner & { log: string[]; maxActive: () => number } {
+  let active = 0;
+  let max = 0;
+  const log: string[] = [];
+  const runner: Runner = {
+    async run(_machine: Machine, _workdir: string, argv: string[]): Promise<ExecResult> {
+      active++;
+      max = Math.max(max, active);
+      log.push(argv.join(" "));
+      await new Promise((r) => setTimeout(r, 20));
+      active--;
+      return { ok: true, data: "[" + argv.join(" ") + "]" };
+    },
+  };
+  return Object.assign(runner, { log, maxActive: () => max });
+}
+
+function makeAgent(llm: Client, runner: Runner): { agent: Agent; store: Store; dir: string } {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "kiwi-agent-"));
+  const store = Store.open(path.join(dir, "server.db"));
+  store.saveMachine({ name: "m", host: "h", port: 22, user: "u", state: "" });
+  const p = store.createProject({ id: 0, name: "p", machine: "m", workdir: "/w" });
+  const sess = store.newSession(p.id, "s");
+  const machine: Machine = { name: "m", host: "h", port: 22, user: "u", state: "" };
+  const agent = new Agent({ llm, runner, machine, workdir: "/w", store });
+  (agent as unknown as { sessID?: string }).sessID = sess.id;
+  return { agent, store, dir };
+}
+
+function tc(id: string, name: string, args: Record<string, unknown>): ToolCall {
+  return { id, name, args: JSON.stringify(args) };
+}
+
+function respWith(calls: ToolCall[]): Response {
+  return { content: "", reasoning: "", toolCalls: calls, usage: { promptTokens: 1, completionTokens: 1 }, finish: "tool_calls" };
+}
+
+describe("agent tool batch", () => {
+  test("read-only batch runs in parallel", async () => {
+    const llm = new ScriptedLLM([
+      respWith([tc("1", "read_file", { path: "a.txt" }), tc("2", "glob", { pattern: "*.py" })]),
+    ]);
+    const runner = makeRunner();
+    const { agent, store, dir } = makeAgent(llm, runner);
+    const p = store.projects()[0]!;
+    const sess = store.newSession(p.id, "s");
+    await agent.turn(undefined, sess.id, "작업");
+    expect(runner.maxActive()).toBe(2);
+    const msgs = store.messages(sess.id);
+    const toolMsgs = msgs.filter((m) => m.role === "tool");
+    expect(toolMsgs.map((m) => m.toolCallID)).toEqual(["1", "2"]);
+    rmSync(dir, { recursive: true, force: true });
+    store.close();
+  });
+
+  test("mixed batch stays sequential", async () => {
+    const llm = new ScriptedLLM([
+      respWith([tc("1", "write_file", { path: "a.txt", content: "x" }), tc("2", "read_file", { path: "a.txt" })]),
+    ]);
+    const runner = makeRunner();
+    const { agent, store, dir } = makeAgent(llm, runner);
+    const p = store.projects()[0]!;
+    const sess = store.newSession(p.id, "s");
+    await agent.turn(undefined, sess.id, "작업");
+    expect(runner.maxActive()).toBe(1);
+    rmSync(dir, { recursive: true, force: true });
+    store.close();
+  });
+
+  test("edit tool shows diff", async () => {
+    const llm = new ScriptedLLM([
+      respWith([tc("1", "edit", { path: "f.txt", edits: [{ oldText: "a", newText: "b" }] })]),
+    ]);
+    const runner = makeRunner();
+    const { agent, store, dir } = makeAgent(llm, runner);
+    const p = store.projects()[0]!;
+    const sess = store.newSession(p.id, "s");
+    await agent.turn(undefined, sess.id, "작업");
+    expect(runner.log).toEqual(["read AGENTS.md", "read f.txt", "edit f.txt"]);
+    const toolMsg = store.messages(sess.id).find((m) => m.role === "tool");
+    expect(toolMsg!.content).toContain("수정됨");
+    rmSync(dir, { recursive: true, force: true });
+    store.close();
+  });
+});
 
 describe("safePath", () => {
   test("accepts relative paths", () => {
