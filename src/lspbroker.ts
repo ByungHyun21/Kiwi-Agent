@@ -49,11 +49,32 @@ const BUILTIN_SERVERS: Record<string, string[]> = {
 function tsServerCmd(): string[] {
   const home = process.env.HOME ?? "/home";
   const cli = path.join(home, ".local", "share", "kiwi", "lsp-runtime", "node_modules", "typescript-language-server", "lib", "cli.mjs");
-  const nodeBin = Bun.which("node");
-  if (fs.existsSync(cli)) {
-    return [nodeBin ?? "node", cli, "--stdio"];
+  if (!fs.existsSync(cli)) return ["typescript-language-server", "--stdio"];
+  let nodeBin = Bun.which("node");
+  if (!nodeBin) {
+    const nvmDir = path.join(home, ".nvm", "versions", "node");
+    try {
+      const versions = fs.readdirSync(nvmDir).sort();
+      for (let i = versions.length - 1; i >= 0; i--) {
+        const cand = path.join(nvmDir, versions[i]!, "bin", "node");
+        if (fs.existsSync(cand)) {
+          nodeBin = cand;
+          break;
+        }
+      }
+    } catch {
+      // no nvm layout
+    }
   }
-  return ["typescript-language-server", "--stdio"];
+  if (!nodeBin) {
+    for (const cand of ["/usr/local/bin/node", "/usr/bin/node"]) {
+      if (fs.existsSync(cand)) {
+        nodeBin = cand;
+        break;
+      }
+    }
+  }
+  return [nodeBin ?? "node", cli, "--stdio"];
 }
 
 export function resolveLangServer(lang: string, root: string): string[] | null {
