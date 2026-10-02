@@ -133,6 +133,14 @@ export class Store {
         seq INTEGER PRIMARY KEY AUTOINCREMENT,
         prompt TEXT NOT NULL
       );`,
+      `ALTER TABLE sessions ADD COLUMN machine TEXT NOT NULL DEFAULT '';
+      ALTER TABLE sessions ADD COLUMN workdir TEXT NOT NULL DEFAULT '';
+      UPDATE sessions SET machine = COALESCE((SELECT p.machine FROM projects p WHERE p.id = sessions.project_id), '') WHERE machine = '';
+      UPDATE sessions SET workdir = COALESCE((SELECT p.workdir FROM projects p WHERE p.id = sessions.project_id), '') WHERE workdir = '';
+      ALTER TABLE machines ADD COLUMN auth_user TEXT NOT NULL DEFAULT '';
+      ALTER TABLE machines ADD COLUMN auth_secret TEXT NOT NULL DEFAULT '';
+      CREATE VIRTUAL TABLE messages_fts USING fts5(text, content='', contentless_delete=1);
+      INSERT INTO messages_fts(rowid, text) SELECT rowid, content FROM messages;`,
     ];
     for (let i = v; i < migrations.length; i++) {
       this.db.run(migrations[i]!);
@@ -361,9 +369,10 @@ export class Store {
   appendMessage(sessionID: string, m: Message): void {
     const row = this.db.query(`SELECT COALESCE(MAX(seq),-1) AS maxSeq FROM messages WHERE session_id=?`).get(sessionID) as { maxSeq: number };
     const calls = m.toolCalls && m.toolCalls.length > 0 ? JSON.stringify(m.toolCalls) : "";
-    this.db.run(
+    const res = this.db.run(
       `INSERT INTO messages(session_id, seq, role, content, tool_calls, tool_call_id, tool_name)
        VALUES(?,?,?,?,?,?,?)`, [sessionID, (row?.maxSeq ?? -1) + 1, m.role, m.content, calls, m.toolCallID ?? "", m.name ?? ""]);
+    this.db.run(`INSERT INTO messages_fts(rowid, text) VALUES (?,?)`, [Number(res.lastInsertRowid), m.content]);
     this.db.run(`UPDATE sessions SET updated_at=? WHERE id=?`, [Math.floor(Date.now() / 1000), sessionID]);
   }
 
@@ -388,14 +397,63 @@ export class Store {
   /** ReplaceMessages swaps the whole history (compact). */
   replaceMessages(sessionID: string, msgs: Message[]): void {
     this.db.transaction(() => {
+      this.db.run(`DELETE FROM messages_fts WHERE rowid IN (SELECT rowid FROM messages WHERE session_id=?)`, [sessionID]);
       this.db.run(`DELETE FROM messages WHERE session_id=?`, [sessionID]);
       msgs.forEach((m, i) => {
         const calls = m.toolCalls && m.toolCalls.length > 0 ? JSON.stringify(m.toolCalls) : "";
-        this.db.run(
+        const res = this.db.run(
           `INSERT INTO messages(session_id, seq, role, content, tool_calls, tool_call_id, tool_name)
            VALUES(?,?,?,?,?,?,?)`, [sessionID, i, m.role, m.content, calls, m.toolCallID ?? "", m.name ?? ""]);
+        this.db.run(`INSERT INTO messages_fts(rowid, text) VALUES (?,?)`, [Number(res.lastInsertRowid), m.content]);
       });
     })();
+  }
+
+  /** SearchMessages returns full-text matches across all sessions. */
+  searchMessages(query: string, limit: number): { sessionId: string; role: string; snippet: string; updatedAt: number }[] {
+    if (query.trim() === "" || limit <= 0) return [];
+    const run = (q: string) =>
+      this.db.query(
+        `SELECT m.session_id AS sid, m.role AS role, substr(m.content, 1, 160) AS snip, s.updated_at AS at
+         FROM messages_fts f JOIN messages m ON m.rowid = f.rowid JOIN sessions s ON s.id = m.session_id
+         WHERE messages_fts MATCH ? ORDER BY rank LIMIT ?`,
+      ).all(q, limit) as { sid: string; role: string; snip: string; at: number }[];
+    try {
+      return run(query).map((r) => ({ sessionId: r.sid, role: r.role, snippet: r.snip, updatedAt: r.at }));
+    } catch {
+      const quoted = '"' + query.replaceAll('"', '""') + '"';
+      try {
+        return run(quoted).map((r) => ({ sessionId: r.sid, role: r.role, snippet: r.snip, updatedAt: r.at }));
+      } catch {
+        return [];
+      }
+    }
+  }
+
+  /** SetSessionLocation overrides the session's machine/workdir (T01). */
+  setSessionLocation(sessionID: string, loc: { machine?: string; workdir?: string }): void {
+    if (loc.machine !== undefined && loc.machine !== "") this.db.run(`UPDATE sessions SET machine=? WHERE id=?`, [loc.machine, sessionID]);
+    if (loc.workdir !== undefined && loc.workdir !== "") this.db.run(`UPDATE sessions SET workdir=? WHERE id=?`, [loc.workdir, sessionID]);
+  }
+
+  /** SessionLocation returns the session's own machine/workdir. */
+  sessionLocation(sessionID: string): { machine: string; workdir: string } {
+    const r = this.db.query(`SELECT machine, workdir FROM sessions WHERE id=?`).get(sessionID) as { machine: string; workdir: string } | null;
+    return { machine: r?.machine ?? "", workdir: r?.workdir ?? "" };
+  }
+
+  /** SaveMachineAuth stores per-machine credentials, obfuscated with the server token. */
+  saveMachineAuth(name: string, user: string, password: string): void {
+    const secret = xorBytes(Buffer.from(password, "utf8"), Buffer.from(this.token(), "utf8")).toString("base64");
+    this.db.run(`UPDATE machines SET auth_user=?, auth_secret=? WHERE name=?`, [user, secret, name]);
+  }
+
+  /** MachineAuth returns stored credentials, or null when absent. */
+  machineAuth(name: string): { user: string; password: string } | null {
+    const r = this.db.query(`SELECT auth_user, auth_secret FROM machines WHERE name=?`).get(name) as { auth_user: string; auth_secret: string } | null;
+    if (!r || r.auth_user === "" || r.auth_secret === "") return null;
+    const password = xorBytes(Buffer.from(r.auth_secret, "base64"), Buffer.from(this.token(), "utf8")).toString("utf8");
+    return { user: r.auth_user, password };
   }
 
   /** RenameSession sets the session name. */
@@ -430,6 +488,12 @@ export class Store {
     this.db.run(`DELETE FROM queue WHERE seq=?`, [row.seq]);
     return row.prompt;
   }
+}
+
+function xorBytes(data: Buffer, key: Buffer): Buffer {
+  const out = Buffer.allocUnsafe(data.length);
+  for (let i = 0; i < data.length; i++) out[i] = data[i]! ^ key[i % key.length]!;
+  return out;
 }
 
 function sessionID(): string {

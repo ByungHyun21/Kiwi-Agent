@@ -107,4 +107,40 @@ describe("Store", () => {
     expect(store.setting("ctx_max")).toBe("32000");
     expect(store.setting("missing")).toBe("");
   });
+
+  test("session location override (T01)", () => {
+    store.saveMachine({ name: "m1", host: "h", port: 22, user: "u", state: "" });
+    store.saveMachine({ name: "m2", host: "h2", port: 22, user: "u", state: "" });
+    const p = store.createProject({ id: 0, name: "p1", machine: "m1", workdir: "/w1" });
+    const s = store.newSession(p.id, "s1");
+    expect(store.sessionLocation(s.id)).toEqual({ machine: "", workdir: "" });
+    store.setSessionLocation(s.id, { machine: "m2", workdir: "/other" });
+    expect(store.sessionLocation(s.id)).toEqual({ machine: "m2", workdir: "/other" });
+    store.setSessionLocation(s.id, { workdir: "/third" });
+    expect(store.sessionLocation(s.id)).toEqual({ machine: "m2", workdir: "/third" });
+  });
+
+  test("machine auth roundtrip, obfuscated at rest (T05)", () => {
+    store.saveMachine({ name: "m1", host: "h", port: 22, user: "u", state: "" });
+    expect(store.machineAuth("m1")).toBeNull();
+    store.saveMachineAuth("m1", "yoon", "s3cret~패스");
+    expect(store.machineAuth("m1")).toEqual({ user: "yoon", password: "s3cret~패스" });
+  });
+
+  test("message full-text search across sessions (A10)", () => {
+    store.saveMachine({ name: "m1", host: "h", port: 22, user: "u", state: "" });
+    const p = store.createProject({ id: 0, name: "p1", machine: "m1", workdir: "/w" });
+    const s1 = store.newSession(p.id, "s1");
+    const s2 = store.newSession(p.id, "s2");
+    store.appendMessage(s1.id, { role: "user", content: "마이그레이션 버그를 수정해줘" });
+    store.appendMessage(s2.id, { role: "assistant", content: "다른 주제에 대한 답변입니다" });
+    const hits = store.searchMessages("마이그레이션", 10);
+    expect(hits.length).toBe(1);
+    expect(hits[0]!.sessionId).toBe(s1.id);
+    expect(hits[0]!.snippet).toContain("마이그레이션");
+    expect(store.searchMessages("존재안하는단어", 10)).toEqual([]);
+    store.replaceMessages(s1.id, [{ role: "user", content: "컴팩트 후 요약" }]);
+    expect(store.searchMessages("마이그레이션", 10)).toEqual([]);
+    expect(store.searchMessages("컴팩트", 10).length).toBe(1);
+  });
 });
