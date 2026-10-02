@@ -65,6 +65,7 @@ export const EvState = "state";
 export const EvHistory = "history"; // replay of a resumed session
 export const EvCat = "cat"; // /cat viewer content
 export const EvPathComplete = "path_complete"; // tab-completion candidates
+export const EvBtwSides = "btw_sides"; // retained btw sides of the current session
 
 /** HistoryEntry is one replayed transcript entry for a resumed session. */
 export interface HistoryEntry {
@@ -98,6 +99,7 @@ export const MsgSetGoal = "set_goal";
 export const MsgProject = "project";
 export const MsgCompact = "compact";
 export const MsgBtw = "btw";
+export const MsgBtwSides = "btw_sides";
 export const MsgSessionCd = "session_cd";
 export const MsgSessionHost = "session_host";
 export const MsgCat = "cat";

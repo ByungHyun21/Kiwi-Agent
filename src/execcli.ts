@@ -15,7 +15,7 @@ export const Version = VERSION;
 export async function run(argv: string[], stdin: ReadableStream<Uint8Array> | null, stdout: typeof process.stdout): Promise<number> {
   let res: ExecResult;
   if (argv.length === 0) {
-    res = fail("badrequest", "usage: kiwi exec <read|write|edit|ls|grep|glob|run|info> [args]");
+    res = fail("badrequest", "usage: kiwi exec <read|write|edit|ls|grep|glob|run|mon|info> [args]");
   } else {
     res = await dispatch(argv, stdin);
   }
@@ -33,6 +33,8 @@ async function dispatch(argv: string[], stdin: ReadableStream<Uint8Array> | null
   switch (cmd) {
     case "read":
       return cmdRead(rest);
+    case "mon":
+      return cmdMon(rest);
     case "write":
       return cmdWrite(rest, stdin);
     case "edit":
@@ -53,14 +55,80 @@ async function dispatch(argv: string[], stdin: ReadableStream<Uint8Array> | null
 }
 
 function cmdRead(argv: string[]): ExecResult {
-  const p = popPath(argv);
-  if (p == null) return fail("badrequest", "usage: kiwi exec read <path>");
+  const args = [...argv];
+  let tagged = false;
+  while (args.length > 0 && args[0] === "--tag") {
+    tagged = true;
+    args.splice(0, 1);
+  }
+  const p = popPath(args);
+  if (p == null) return fail("badrequest", "usage: kiwi exec read [--tag] <path>");
   try {
     const data = fs.readFileSync(p, "utf8");
-    return { ok: true, data };
+    return { ok: true, data: tagged ? taggedText(data) : data };
   } catch (err) {
     return errResult(err);
   }
+}
+
+const TAG_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ234567890";
+
+function lineTag(line: string, lineNo: number): string {
+  const normalized = line.replace(/\r$/, "").replace(/\s+$/, "");
+  const seed = normalized === "" ? lineNo : 0;
+  const A = TAG_ALPHABET.length;
+  const h = Number(Bun.hash.xxHash32(normalized, seed)) % (A * A * A);
+  return TAG_ALPHABET[Math.floor(h / (A * A)) % A]! + TAG_ALPHABET[Math.floor(h / A) % A]! + TAG_ALPHABET[h % A]!;
+}
+
+/** taggedText renders "N#TAG│ content" per line for pos-anchored edits. */
+export function taggedText(text: string): string {
+  const lines = text.split("\n");
+  if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
+  return lines.map((ln, i) => `${i + 1}#${lineTag(ln, i + 1)}│ ${ln}`).join("\n");
+}
+
+interface LineEdit {
+  pos: string;
+  op: "replace" | "insertBefore" | "insertAfter" | "delete";
+  newText?: string;
+}
+
+function applyLineEdits(text: string, ops: LineEdit[]): { ok: true; text: string } | { ok: false; code: string; message: string } {
+  const trailingNl = text.endsWith("\n");
+  const lines = text.split("\n");
+  if (trailingNl) lines.pop();
+  const seen = new Set<number>();
+  const sorted = [...ops].sort((a, b) => Number(b.pos.split("#")[0]) - Number(a.pos.split("#")[0]));
+  for (const op of sorted) {
+    const m = /^(\d+)#([A-Z2-9]{3})$/.exec(op.pos);
+    if (!m) return { ok: false, code: "badrequest", message: `pos 형식 오류: ${op.pos} (예: 12#ABC)` };
+    const lineNo = parseInt(m[1]!, 10);
+    if (lineNo < 1 || lineNo > lines.length) return { ok: false, code: "badrequest", message: `줄 번호 범위 초과: ${op.pos} (전체 ${lines.length}줄)` };
+    if (seen.has(lineNo)) return { ok: false, code: "badrequest", message: `같은 줄에 여러 연산: ${op.pos}` };
+    seen.add(lineNo);
+    const current = lines[lineNo - 1]!;
+    if (lineTag(current, lineNo) !== m[2]) {
+      return { ok: false, code: "conflict", message: `stale: ${op.pos} — 줄 내용이 읽은 뒤 바뀌었습니다. 다시 read --tag 하세요` };
+    }
+    switch (op.op) {
+      case "replace":
+        if (typeof op.newText !== "string") return { ok: false, code: "badrequest", message: `replace는 newText 필요: ${op.pos}` };
+        lines[lineNo - 1] = op.newText;
+        break;
+      case "insertBefore":
+      case "insertAfter":
+        if (typeof op.newText !== "string") return { ok: false, code: "badrequest", message: `${op.op}는 newText 필요: ${op.pos}` };
+        lines.splice(op.op === "insertBefore" ? lineNo - 1 : lineNo, 0, op.newText);
+        break;
+      case "delete":
+        lines.splice(lineNo - 1, 1);
+        break;
+      default:
+        return { ok: false, code: "badrequest", message: `알 수 없는 op: ${op.op}` };
+    }
+  }
+  return { ok: true, text: lines.join("\n") + (trailingNl ? "\n" : "") };
 }
 
 async function cmdWrite(argv: string[], stdin: ReadableStream<Uint8Array> | null): Promise<ExecResult> {
@@ -252,13 +320,35 @@ async function cmdEdit(argv: string[], stdin: ReadableStream<Uint8Array> | null)
   } catch (err) {
     return fail("error", "stdin 읽기 실패: " + String(err));
   }
-  let ops: { oldText: string; newText: string }[];
+  let parsedBody: { edits?: { oldText?: string; newText?: string }[]; lineEdits?: { pos?: string; op?: string; newText?: string }[] };
   try {
-    const parsed = JSON.parse(body || "{}") as { edits?: { oldText?: string; newText?: string }[] };
-    ops = (parsed.edits ?? []).map((e) => ({ oldText: String(e.oldText ?? ""), newText: String(e.newText ?? "") }));
+    parsedBody = JSON.parse(body || "{}") as typeof parsedBody;
   } catch (err) {
     return fail("badrequest", "edits JSON 파싱 실패: " + String(err));
   }
+  if (parsedBody.lineEdits !== undefined) {
+    const lineOps = parsedBody.lineEdits.map((e) => ({
+      pos: String(e.pos ?? ""),
+      op: (e.op ?? "replace") as LineEdit["op"],
+      newText: e.newText === undefined ? undefined : String(e.newText),
+    }));
+    if (lineOps.length === 0) return fail("badrequest", "lineEdits 비어 있음");
+    let cur: string;
+    try {
+      cur = fs.readFileSync(p, "utf8");
+    } catch (err) {
+      return errResult(err);
+    }
+    const applied = applyLineEdits(cur, lineOps);
+    if (!applied.ok) return fail(applied.code, applied.message);
+    try {
+      writeFileAtomic(p, Buffer.from(applied.text, "utf8"), 0o644);
+    } catch (err) {
+      return errResult(err);
+    }
+    return { ok: true, data: JSON.stringify({ applied: lineOps.length, sha: shaHex(Buffer.from(applied.text, "utf8")), content: applied.text.length > 256 * 1024 ? "(256KB 초과 — 내용 생략)" : applied.text }) };
+  }
+  const ops = (parsedBody.edits ?? []).map((e) => ({ oldText: String(e.oldText ?? ""), newText: String(e.newText ?? "") }));
   if (ops.length === 0) return fail("badrequest", "edits 비어 있음");
   let text: string;
   try {
@@ -284,6 +374,142 @@ async function cmdEdit(argv: string[], stdin: ReadableStream<Uint8Array> | null)
 function snippet(s: string): string {
   const one = s.replace(/\s+/g, " ").trim();
   return one.length > 60 ? one.slice(0, 60) + "…" : one;
+}
+
+function monDir(): string {
+  return path.join(process.cwd(), ".kiwi-mon");
+}
+
+function monMetaPath(id: string): string {
+  return path.join(monDir(), id + ".json");
+}
+
+function monReadMeta(id: string): { id: string; label: string; logPath: string; pid: number; startedAt: number; outOffset: number; stoppedAt?: number } {
+  const raw = JSON.parse(fs.readFileSync(monMetaPath(id), "utf8")) as { id: string; label: string; logPath: string; pid: number; startedAt: number; outOffset: number; stoppedAt?: number };
+  return raw;
+}
+
+function monWriteMeta(meta: Record<string, unknown>): void {
+  const tmp = monMetaPath(String(meta.id)) + ".tmp";
+  fs.writeFileSync(tmp, JSON.stringify(meta));
+  fs.renameSync(tmp, monMetaPath(String(meta.id)));
+}
+
+function monAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function cmdMon(argv: string[]): ExecResult {
+  const [sub, ...rest] = argv;
+  switch (sub) {
+    case "start":
+      return monStart(rest);
+    case "out":
+      return monOut(rest);
+    case "stop":
+      return monStop(rest);
+    case "list":
+      return monList();
+    default:
+      return fail("badrequest", "usage: kiwi exec mon <start|out|stop|list> …");
+  }
+}
+
+function monStart(argv: string[]): ExecResult {
+  const args = [...argv];
+  let label = "monitor";
+  while (args.length > 0 && args[0] === "--label") {
+    if (args.length < 2) return fail("badrequest", "--label requires a value");
+    label = args[1]!;
+    args.splice(0, 2);
+  }
+  if (args.length === 0) return fail("badrequest", "usage: kiwi exec mon start [--label <name>] <command> [args…]");
+  const id = "mon_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  fs.mkdirSync(monDir(), { recursive: true, mode: 0o755 });
+  const logPath = path.join(monDir(), id + ".log");
+  const logFd = fs.openSync(logPath, "a");
+  let proc;
+  try {
+    proc = Bun.spawn(["setsid", ...args], { stdin: "ignore", stdout: logFd, stderr: logFd });
+  } catch (err) {
+    return fail("badrequest", "spawn 실패(setsid 필요): " + String(err));
+  }
+  monWriteMeta({ id, label, argv: args, logPath, pid: proc.pid, startedAt: Date.now(), outOffset: 0 });
+  return { ok: true, data: JSON.stringify({ id, label, pid: proc.pid }) };
+}
+
+function monOut(argv: string[]): ExecResult {
+  const id = argv[0];
+  if (!id) return fail("badrequest", "usage: kiwi exec mon out <id>");
+  let meta;
+  try {
+    meta = monReadMeta(id);
+  } catch (err) {
+    return errResult(err);
+  }
+  const st = fs.statSync(meta.logPath);
+  const from = Math.min(meta.outOffset, st.size);
+  const len = Math.min(st.size - from, 64 * 1024);
+  const buf = Buffer.alloc(len);
+  const fd = fs.openSync(meta.logPath, "r");
+  fs.readSync(fd, buf, 0, len, from);
+  fs.closeSync(fd);
+  meta.outOffset = from + len;
+  monWriteMeta(meta);
+  const running = meta.stoppedAt === undefined && monAlive(meta.pid);
+  return { ok: true, data: JSON.stringify({ id: meta.id, label: meta.label, running, newOutput: buf.toString("utf8") }) };
+}
+
+function monStop(argv: string[]): ExecResult {
+  const id = argv[0];
+  if (!id) return fail("badrequest", "usage: kiwi exec mon stop <id>");
+  let meta;
+  try {
+    meta = monReadMeta(id);
+  } catch (err) {
+    return errResult(err);
+  }
+  try {
+    process.kill(-meta.pid, "SIGTERM");
+  } catch {
+    // already dead
+  }
+  Bun.sleepSync(200);
+  if (monAlive(meta.pid)) {
+    try {
+      process.kill(-meta.pid, "SIGKILL");
+    } catch {
+      // already dead
+    }
+  }
+  monWriteMeta({ ...meta, stoppedAt: Date.now() });
+  return { ok: true, data: JSON.stringify({ id: meta.id, stopped: true }) };
+}
+
+function monList(): ExecResult {
+  fs.mkdirSync(monDir(), { recursive: true, mode: 0o755 });
+  const out: { id: string; label: string; running: boolean; startedAt: number; bytes: number }[] = [];
+  for (const f of fs.readdirSync(monDir())) {
+    if (!f.endsWith(".json")) continue;
+    try {
+      const meta = monReadMeta(f.slice(0, -5));
+      out.push({
+        id: meta.id,
+        label: meta.label,
+        running: meta.stoppedAt === undefined && monAlive(meta.pid),
+        startedAt: meta.startedAt,
+        bytes: fs.statSync(meta.logPath).size,
+      });
+    } catch {
+      // skip broken meta
+    }
+  }
+  return { ok: true, data: JSON.stringify(out) };
 }
 
 function cmdInfo(): ExecResult {

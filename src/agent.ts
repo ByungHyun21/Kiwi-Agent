@@ -134,18 +134,26 @@ export class Agent {
       }
       case "read_file": {
         if (!safePath(p)) return pathErr(p);
-        const res = await this.runner.run(this.machine, this.workdir, ["read", p], null, signal);
+        const res = await this.runner.run(this.machine, this.workdir, ["read", ...(args.tagged === true ? ["--tag"] : []), p], null, signal);
         if (!res.ok) return `오류 (${res.code}): ${res.message}`;
         return res.data ?? "";
       }
       case "edit": {
         if (!safePath(p)) return pathErr(p);
-        const rawEdits = Array.isArray(args.edits) ? (args.edits as { oldText?: unknown; newText?: unknown }[]) : [];
-        const edits = rawEdits.map((e) => ({ oldText: String(e.oldText ?? ""), newText: String(e.newText ?? "") }));
-        if (edits.length === 0) return "오류: edits 배열이 비어 있습니다";
         const old = await this.runner.run(this.machine, this.workdir, ["read", p], null, signal);
         const oldText = old.ok ? old.data ?? "" : "";
-        const res = await this.runner.run(this.machine, this.workdir, ["edit", p], new TextEncoder().encode(JSON.stringify({ edits })), signal);
+        let payload: { edits?: { oldText: string; newText: string }[]; lineEdits?: { pos: string; op: string; newText?: string }[] };
+        if (Array.isArray(args.lineEdits)) {
+          const raw = args.lineEdits as { pos?: unknown; op?: unknown; newText?: unknown }[];
+          payload = { lineEdits: raw.map((e) => ({ pos: String(e.pos ?? ""), op: String(e.op ?? "replace"), ...(e.newText === undefined ? {} : { newText: String(e.newText) }) })) };
+          if (payload.lineEdits!.length === 0) return "오류: lineEdits 배열이 비어 있습니다";
+        } else {
+          const rawEdits = Array.isArray(args.edits) ? (args.edits as { oldText?: unknown; newText?: unknown }[]) : [];
+          const edits = rawEdits.map((e) => ({ oldText: String(e.oldText ?? ""), newText: String(e.newText ?? "") }));
+          if (edits.length === 0) return "오류: edits 배열이 비어 있습니다";
+          payload = { edits };
+        }
+        const res = await this.runner.run(this.machine, this.workdir, ["edit", p], new TextEncoder().encode(JSON.stringify(payload)), signal);
         if (!res.ok) return `오류 (${res.code}): ${res.message}`;
         let newText = "";
         try {
@@ -177,6 +185,33 @@ export class Agent {
         const pattern = str("pattern");
         if (pattern === "") return "오류: pattern이 비어 있습니다";
         const res = await this.runner.run(this.machine, this.workdir, ["glob", pattern, p !== "" && safePath(p) ? p : "."], null, signal);
+        if (!res.ok) return `오류 (${res.code}): ${res.message}`;
+        return res.data ?? "";
+      }
+      case "monitor_start": {
+        const argv = tokenize(str("command"));
+        if (argv.length === 0) return "오류: command가 비어 있습니다";
+        const label = str("label");
+        const res = await this.runner.run(this.machine, this.workdir, ["mon", "start", ...(label !== "" ? ["--label", label] : []), ...argv], null, signal);
+        if (!res.ok) return `오류 (${res.code}): ${res.message}`;
+        return res.data ?? "";
+      }
+      case "monitor_output": {
+        const id = str("id");
+        if (id === "") return "오류: id가 비어 있습니다";
+        const res = await this.runner.run(this.machine, this.workdir, ["mon", "out", id], null, signal);
+        if (!res.ok) return `오류 (${res.code}): ${res.message}`;
+        return res.data ?? "";
+      }
+      case "monitor_stop": {
+        const id = str("id");
+        if (id === "") return "오류: id가 비어 있습니다";
+        const res = await this.runner.run(this.machine, this.workdir, ["mon", "stop", id], null, signal);
+        if (!res.ok) return `오류 (${res.code}): ${res.message}`;
+        return res.data ?? "";
+      }
+      case "monitor_list": {
+        const res = await this.runner.run(this.machine, this.workdir, ["mon", "list"], null, signal);
         if (!res.ok) return `오류 (${res.code}): ${res.message}`;
         return res.data ?? "";
       }
@@ -279,7 +314,9 @@ const systemPrompt = `당신은 코딩 에이전트입니다. 도구로 작업 �
 - 코드 내용 검색은 grep, 파일명 검색은 glob을 사용하세요.
 - 빌드·테스트·실행은 run을 사용하세요 (command는 따옴표로 인자를 구분하는 명령 문자열).
 - 서로 의존하지 않는 읽기(read_file, list_dir, grep, glob, session_search, session_read)는 한 응답에 여러 개 함께 호출하면 병렬로 실행됩니다.
-- 과거 세션 기록은 session_search로 검색하고 session_read로 읽을 수 있습니다.`;
+- 과거 세션 기록은 session_search로 검색하고 session_read로 읽을 수 있습니다.
+- read_file에 tagged:true를 주면 각 줄이 "N#TAG│ 내용" 형태로 옵니다. 정밀 줄 수정은 edit의 lineEdits([{pos:"N#TAG", op:"replace"|"insertBefore"|"insertAfter"|"delete", newText}])로 하세요 — 읽은 뒤 줄이 바뀌었으면 거부(stale)됩니다.
+- 오래 걸리는 명령(서버 기동, 로그 감시)은 monitor_start로 시작하고 monitor_output으로 새 출력을 받아오고(아직 running이면 잠시 후 다시) monitor_stop으로 중지합니다. monitor_list로 목록을 봅니다.`;
 
 /** SystemPrompt exposes the agent system prompt (used by side channels). */
 export function systemPromptText(): string {
@@ -301,11 +338,12 @@ const agentTools: Tool[] = [
   },
   {
     name: "read_file",
-    description: "작업 폴더의 파일 내용을 읽습니다.",
+    description: "작업 폴더의 파일 내용을 읽습니다. tagged:true면 줄마다 N#TAG│ 접두가 붙습니다.",
     parameters: {
       type: "object",
       properties: {
         path: { type: "string" },
+        tagged: { type: "boolean", description: "줄 태그 포함(정밀 줄 편집용)" },
       },
       required: ["path"],
     },
@@ -317,6 +355,19 @@ const agentTools: Tool[] = [
       type: "object",
       properties: {
         path: { type: "string", description: "상대 경로" },
+        lineEdits: {
+          type: "array",
+          description: "pos 태그 기반 줄 편집(read_file tagged:true의 N#TAG 사용). edits 대신 사용",
+          items: {
+            type: "object",
+            properties: {
+              pos: { type: "string", description: "예: 12#ABC" },
+              op: { type: "string", description: "replace | insertBefore | insertAfter | delete" },
+              newText: { type: "string" },
+            },
+            required: ["pos"],
+          },
+        },
         edits: {
           type: "array",
           description: "순서대로 적용할 치환 목록",
@@ -369,6 +420,48 @@ const agentTools: Tool[] = [
     },
   },
   {
+    name: "monitor_start",
+    description: "셸 명령을 백그라운드에서 시작하고 감시합니다(서버 기동, 로그 감시 등). 즉시 monitor id를 반환합니다.",
+    parameters: {
+      type: "object",
+      properties: {
+        command: { type: "string", description: "예: python3 -m http.server 8000" },
+        label: { type: "string", description: "선택: 표시 이름" },
+      },
+      required: ["command"],
+    },
+  },
+  {
+    name: "monitor_output",
+    description: "감시 중인 명령의 새 출력을 받아옵니다. running:true면 아직 진행 중이니 적절히 다시 호출하세요.",
+    parameters: {
+      type: "object",
+      properties: {
+        id: { type: "string" },
+      },
+      required: ["id"],
+    },
+  },
+  {
+    name: "monitor_stop",
+    description: "감시 중인 명령을 중지합니다.",
+    parameters: {
+      type: "object",
+      properties: {
+        id: { type: "string" },
+      },
+      required: ["id"],
+    },
+  },
+  {
+    name: "monitor_list",
+    description: "모니터 목록(id, 라벨, 실행 여부, 출력 바이트)을 반환합니다.",
+    parameters: {
+      type: "object",
+      properties: {},
+    },
+  },
+  {
     name: "run",
     description: "작업 폴더에서 셸 명령을 실행합니다(빌드, 테스트, 실행 등). 명령은 직접 실행되며 경로 이동 없이 작업 폴더에서 시작됩니다.",
     parameters: {
@@ -405,7 +498,7 @@ const agentTools: Tool[] = [
   },
 ];
 
-const READ_ONLY_TOOLS = new Set(["read_file", "list_dir", "grep", "glob", "session_search", "session_read"]);
+const READ_ONLY_TOOLS = new Set(["read_file", "list_dir", "grep", "glob", "session_search", "session_read", "monitor_output", "monitor_list"]);
 
 function pathErr(p: string): string {
   return "오류: 경로는 작업 폴더 안의 상대 경로여야 합니다: " + p;

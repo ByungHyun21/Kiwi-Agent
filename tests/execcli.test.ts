@@ -150,4 +150,62 @@ describe("kiwi exec", () => {
     expect(dup.res.ok).toBe(false);
     expect(dup.res.message as string).toContain("중복");
   });
+
+  test("read --tag emits N#TAG per line", async () => {
+    await exec(["write", "tag.txt"], "alpha\nbeta\n\ngamma\n");
+    const { res } = await exec(["read", "--tag", "tag.txt"]);
+    const lines = (res.data as string).split("\n");
+    expect(lines[0]).toMatch(/^1#[A-Z0-9]{3}│ alpha$/);
+    expect(lines[1]).toMatch(/^2#[A-Z0-9]{3}│ beta$/);
+    expect(lines[2]).toMatch(/^3#[A-Z0-9]{3}│ $/);
+    expect(lines[3]).toMatch(/^4#[A-Z0-9]{3}│ gamma$/);
+  });
+
+  test("lineEdits replace applies and stale pos is rejected", async () => {
+    await exec(["write", "pos.txt"], "one\ntwo\nthree\n");
+    const tag = (await exec(["read", "--tag", "pos.txt"])).res.data as string;
+    const pos2 = tag.split("\n")[1]!.split("│")[0];
+    const ok = await exec(["edit", "pos.txt"], JSON.stringify({ lineEdits: [{ pos: pos2, op: "replace", newText: "TWO" }] }));
+    expect(ok.res.ok).toBe(true);
+    const { res: after } = await exec(["read", "pos.txt"]);
+    expect(after.data).toBe("one\nTWO\nthree\n");
+    const stale = await exec(["edit", "pos.txt"], JSON.stringify({ lineEdits: [{ pos: pos2, op: "replace", newText: "X" }] }));
+    expect(stale.res.ok).toBe(false);
+    expect(stale.res.code).toBe("conflict");
+    expect(stale.res.message as string).toContain("stale");
+  });
+
+  test("lineEdits insertBefore and delete", async () => {
+    await exec(["write", "pos2.txt"], "a\nb\nc\n");
+    const tag = (await exec(["read", "--tag", "pos2.txt"])).res.data as string;
+    const pos1 = tag.split("\n")[0]!.split("│")[0];
+    const pos3 = tag.split("\n")[2]!.split("│")[0];
+    const ok = await exec(["edit", "pos2.txt"], JSON.stringify({ lineEdits: [
+      { pos: pos1, op: "insertBefore", newText: "START" },
+      { pos: pos3, op: "delete" },
+    ] }));
+    expect(ok.res.ok).toBe(true);
+    const { res: after } = await exec(["read", "pos2.txt"]);
+    expect(after.data).toBe("START\na\nb\n");
+  });
+
+  test("mon lifecycle: start, output, stop, list", async () => {
+    const started = await exec(["mon", "start", "--label", "t1", "sh", "-c", "for i in 1 2 3; do echo M$i; done; sleep 0.3"]);
+    expect(started.res.ok).toBe(true);
+    const id = (JSON.parse(started.res.data as string) as { id: string }).id;
+    await new Promise((r) => setTimeout(r, 700));
+    const out = await exec(["mon", "out", id]);
+    const outData = JSON.parse(out.res.data as string) as { running: boolean; newOutput: string };
+    expect(outData.newOutput).toContain("M1");
+    expect(outData.newOutput).toContain("M3");
+    expect(outData.running).toBe(false);
+    const sleeper = await exec(["mon", "start", "--label", "t2", "sleep", "5"]);
+    const sid = (JSON.parse(sleeper.res.data as string) as { id: string }).id;
+    const list1 = JSON.parse((await exec(["mon", "list"])).res.data as string) as { id: string; running: boolean }[];
+    expect(list1.find((x) => x.id === sid)?.running).toBe(true);
+    const stop = await exec(["mon", "stop", sid]);
+    expect(stop.res.ok).toBe(true);
+    const list2 = JSON.parse((await exec(["mon", "list"])).res.data as string) as { id: string; running: boolean }[];
+    expect(list2.find((x) => x.id === sid)?.running).toBe(false);
+  });
 });

@@ -141,6 +141,9 @@ export class Store {
       ALTER TABLE machines ADD COLUMN auth_secret TEXT NOT NULL DEFAULT '';
       CREATE VIRTUAL TABLE messages_fts USING fts5(text, content='', contentless_delete=1);
       INSERT INTO messages_fts(rowid, text) SELECT rowid, content FROM messages;`,
+      `ALTER TABLE sessions ADD COLUMN kind TEXT NOT NULL DEFAULT '';
+      ALTER TABLE sessions ADD COLUMN parent TEXT NOT NULL DEFAULT '';
+      CREATE INDEX IF NOT EXISTS idx_sessions_parent ON sessions(parent, kind);`,
     ];
     for (let i = v; i < migrations.length; i++) {
       this.db.run(migrations[i]!);
@@ -329,10 +332,10 @@ export class Store {
 
   /** Sessions lists sessions, newest first, optionally filtered by project. */
   sessions(projectId: number): SessionInfo[] {
-    let q = `SELECT s.id, s.name, p.name AS project, s.workdir AS workdir, s.updated_at FROM sessions s JOIN projects p ON p.id = s.project_id`;
+    let q = `SELECT s.id, s.name, p.name AS project, s.workdir AS workdir, s.updated_at FROM sessions s JOIN projects p ON p.id = s.project_id WHERE s.kind=''`;
     const params: SQLQueryBindings[] = [];
     if (projectId > 0) {
-      q += ` WHERE s.project_id=?`;
+      q += ` AND s.project_id=?`;
       params.push(projectId);
     }
     q += ` ORDER BY s.updated_at DESC LIMIT 50`;
@@ -429,6 +432,35 @@ export class Store {
         return [];
       }
     }
+  }
+
+  /** NewBtwSide creates a retained BTW side under the parent session (U01). */
+  newBtwSide(parentID: string): Session {
+    const id = sessionID();
+    const n = this.db.query(`SELECT COUNT(*) AS c FROM sessions WHERE parent=? AND kind='btw'`).get(parentID) as { c: number } | null;
+    const name = `BTW #${(n?.c ?? 0) + 1}`;
+    const now = Math.floor(Date.now() / 1000);
+    const prj = this.db.query(`SELECT project_id FROM sessions WHERE id=?`).get(parentID) as { project_id: number } | null;
+    const pid = prj?.project_id ?? 0;
+    this.db.run(
+      `INSERT INTO sessions(id, project_id, name, kind, parent, created_at, updated_at) VALUES(?,?,?,?,?,?,?)`,
+      [id, pid, name, "btw", parentID, now, now]);
+    return { id, projectId: pid, name, goal: "", promptTokens: 0, completionTokens: 0, updatedAt: new Date(now * 1000) };
+  }
+
+  /** BtwSides lists retained sides of a parent session, newest first. */
+  btwSides(parentID: string): SessionInfo[] {
+    if (parentID === "") return [];
+    const rows = this.db
+      .query(`SELECT id, name, updated_at FROM sessions WHERE parent=? AND kind='btw' ORDER BY updated_at DESC LIMIT 20`)
+      .all(parentID) as { id: string; name: string; updated_at: number }[];
+    return rows.map((r) => ({ id: r.id, name: r.name, updatedAt: new Date(r.updated_at * 1000) }));
+  }
+
+  /** SessionKind returns the session's kind ('' for main, 'btw' for sides). */
+  sessionKind(sessionID: string): string {
+    const r = this.db.query(`SELECT kind FROM sessions WHERE id=?`).get(sessionID) as { kind: string } | null;
+    return r?.kind ?? "";
   }
 
   /** SetSessionLocation overrides the session's machine/workdir (T01). */

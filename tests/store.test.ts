@@ -143,4 +143,25 @@ describe("Store", () => {
     expect(store.searchMessages("마이그레이션", 10)).toEqual([]);
     expect(store.searchMessages("컴팩트", 10).length).toBe(1);
   });
+
+  test("btw side lifecycle (U01)", () => {
+    store.saveMachine({ name: "m1", host: "h", port: 22, user: "u", state: "" });
+    const p = store.createProject({ id: 0, name: "p1", machine: "m1", workdir: "/w" });
+    const main = store.newSession(p.id, "main");
+    store.appendMessage(main.id, { role: "user", content: "메인 흐름" });
+    expect(store.btwSides(main.id)).toEqual([]);
+    const side1 = store.newBtwSide(main.id);
+    const side2 = store.newBtwSide(main.id);
+    expect(side1.name).toBe("BTW #1");
+    expect(side2.name).toBe("BTW #2");
+    expect(store.sessionKind(side1.id)).toBe("btw");
+    store.appendMessage(side1.id, { role: "user", content: "사이드 질문" });
+    store.appendMessage(side1.id, { role: "assistant", content: "사이드 답변" });
+    const sides = store.btwSides(main.id);
+    expect(sides.map((x) => x.name)).toContain("BTW #1");
+    const mainList = store.sessions(p.id).map((x) => x.id);
+    expect(mainList).toContain(main.id);
+    expect(mainList).not.toContain(side1.id);
+    expect(mainList).not.toContain(side2.id);
+  });
 });

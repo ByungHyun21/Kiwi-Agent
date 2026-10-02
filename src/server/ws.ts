@@ -7,6 +7,7 @@ import {
   EvHello,
   EvHistory,
   EvReasoning,
+  EvBtwSides,
   EvCat,
   EvPathComplete,
   EvSessions,
@@ -14,6 +15,7 @@ import {
   EvStatus,
   HistoryEntry,
   MsgBtw,
+  MsgBtwSides,
   MsgCat,
   MsgPathComplete,
   MsgSessionCd,
@@ -170,7 +172,10 @@ export class Conn {
         return;
       case MsgBtw:
         if (this.sess === "") return;
-        this.runBtw(msg.text ?? "");
+        this.runBtw(msg.text ?? "", msg.sessionId);
+        return;
+      case MsgBtwSides:
+        this.send({ type: EvBtwSides, sessions: this.srv.store.btwSides(this.sess) });
         return;
       case MsgSessionCd: {
         const p = msg.text ?? "";
@@ -328,37 +333,54 @@ export class Conn {
     }
   }
 
-  private async runBtw(text: string): Promise<void> {
+  private async runBtw(text: string, sideId?: string): Promise<void> {
     let agent: Agent;
     try {
       agent = this.srv.agentFor(this.sess);
     } catch {
       return;
     }
-    const recent = this.srv.store.messages(this.sess).slice(-64);
-    const kept: Message[] = [];
-    let budget = 64 * 1024;
-    for (let i = recent.length - 1; i >= 0; i--) {
-      const m = recent[i]!;
-      if (budget - m.content.length < 0) break;
-      budget -= m.content.length;
-      kept.unshift(m);
+    let target = "";
+    const msgs: Message[] = [{ role: "system", content: systemPromptText() }];
+    const boundTail = (sid: string): Message[] => {
+      const recent = this.srv.store.messages(sid).slice(-64);
+      const kept: Message[] = [];
+      let budget = 64 * 1024;
+      for (let i = recent.length - 1; i >= 0; i--) {
+        const m = recent[i]!;
+        if (budget - m.content.length < 0) break;
+        budget -= m.content.length;
+        kept.unshift(m);
+      }
+      return kept;
+    };
+    if (sideId !== undefined && sideId !== "") {
+      const sides = this.srv.store.btwSides(this.sess);
+      if (!sides.some((x) => x.id === sideId)) {
+        this.send({ type: EvError, error: "사이드를 찾을 수 없습니다: " + sideId });
+        return;
+      }
+      target = sideId;
+      for (const m of boundTail(sideId)) msgs.push({ role: m.role, content: m.content, toolCallID: m.toolCallID, name: m.name });
+    } else {
+      target = this.srv.store.newBtwSide(this.sess).id;
+      for (const m of boundTail(this.sess)) msgs.push({ role: m.role, content: m.content, toolCallID: m.toolCallID, name: m.name });
     }
-    const msgs = [{ role: "system", content: systemPromptText() } as Message];
-    for (const m of kept) {
-      msgs.push({ role: m.role, content: m.content, toolCallID: m.toolCallID, name: m.name });
-    }
-    msgs.push({ role: "user", content: "(사이드 질문, 세션 기록에 반영하지 않음) " + text });
+    msgs.push({ role: "user", content: "(사이드 질문, 메인 세션 기록에 반영하지 않음) " + text });
 
     this.busy = true;
+    let answer = "";
     try {
       await agent.llm.streamChat(undefined, msgs, [], (kind, _name, chunk) => {
         if (kind === "reasoning") {
           this.send({ type: EvReasoning, text: chunk });
         } else {
+          answer += chunk;
           this.send({ type: EvDelta, text: chunk });
         }
       });
+      this.srv.store.appendMessage(target, { role: "user", content: text });
+      this.srv.store.appendMessage(target, { role: "assistant", content: answer });
     } catch (err) {
       this.send({ type: EvError, error: err instanceof Error ? err.message : String(err) });
     } finally {

@@ -23,6 +23,8 @@ export const enum MenuAction {
   SetGoalInput = 9,
   ClearGoal = 10,
   ResumeSession = 11,
+  BtwNewSide = 12,
+  BtwOpenSide = 13,
   // extra actions that only exist after input/confirm
   OpenProjectCreate = 100,
   ConnectExec = 101,
@@ -142,6 +144,14 @@ export function menuModels(models: string[], current: string): Menu {
   }));
   items.push({ label: "↻ 새로고침", desc: "", action: MenuAction.RefreshModels, payload: "" });
   return new Menu("모델", items);
+}
+
+export function menuBtwSides(sides: SessionInfo[]): Menu {
+  const items: MenuItem[] = [{ label: "＋ 새 사이드", desc: "새 BTW 사이드 질문", action: MenuAction.BtwNewSide, payload: "" }];
+  for (const s of sides) {
+    items.push({ label: "◇ " + s.name, desc: s.updatedAt ? s.updatedAt.toLocaleString() : "", action: MenuAction.BtwOpenSide, payload: s.id });
+  }
+  return new Menu("BTW 사이드", items);
 }
 
 export function menuGoal(goal: string): Menu {

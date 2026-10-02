@@ -7,7 +7,7 @@ import { sanitizeInput } from "./noise.ts";
 import { saveServer } from "./config.ts";
 import { clampPopupSel, popupView } from "./popup.ts";
 import { candidates } from "./commands.ts";
-import { menuModels, menuProjects, menuServer, updateMenu } from "./menu.ts";
+import { menuBtwSides, menuModels, menuProjects, menuServer, updateMenu } from "./menu.ts";
 import { execAction, runCommand } from "./cmdexec.ts";
 import {
   fetchMachines,
@@ -88,6 +88,13 @@ export function update(m: Model, msg: unknown): Cmd[] {
       applyEvent(m, ev);
       if (ev.type === "done" || ev.type === "error") {
         process.stdout.write("\x07\x1b]9;kiwi\x1b\\");
+      }
+      if (ev.type === "btw_sides") {
+        m.btwSides = ev.sessions ?? [];
+        if (m.wantBtwPicker) {
+          m.wantBtwPicker = false;
+          m.menu = menuBtwSides(m.btwSides as never);
+        }
       }
       if (ev.type === "path_complete") {
         const head = pathArgPrefix(m.msgIn.getValue());

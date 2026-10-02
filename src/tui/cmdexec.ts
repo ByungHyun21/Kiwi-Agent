@@ -286,8 +286,12 @@ function cmdGoal(m: Model, fields: string[]): Cmd[] {
 
 function cmdBtw(m: Model, fields: string[]): Cmd[] {
   if (fields.length < 2) {
-    m.notice = "사용법: /btw <질문>";
-    return [];
+    if (!requireConn(m) || m.currentSession === "") {
+      m.notice = "사용법: /btw <질문>";
+      return [];
+    }
+    m.wantBtwPicker = true;
+    return orEmpty(sendCmd(m.client, { type: "btw_sides" }));
   }
   if (!requireConn(m)) return [];
   return orEmpty(sendCmd(m.client, { type: "btw", text: arg(fields) }));
@@ -427,6 +431,16 @@ export function execAction(m: Model, act: MenuAction, payload: string, input: st
       if (m.client) {
         return orEmpty(sendCmd(m.client, { type: "set_goal", text: "" }));
       }
+      return [];
+    case MenuAction.BtwNewSide:
+      m.startInlinePrompt("새 사이드 질문", false, (value) => {
+        if (m.client) orEmpty(sendCmd(m.client, { type: "btw", text: value }));
+      });
+      return [];
+    case MenuAction.BtwOpenSide:
+      m.startInlinePrompt("사이드 이어서 질문", false, (value) => {
+        if (m.client) orEmpty(sendCmd(m.client, { type: "btw", text: value, sessionId: payload }));
+      });
       return [];
     case MenuAction.ResumeSession: {
       for (const s of m.sessionIDs) {

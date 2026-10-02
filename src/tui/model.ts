@@ -55,6 +55,8 @@ export class Model {
   catView: { path: string; lines: string[]; scroll: number } | null = null;
   pathCands: { replaceFrom: string; items: string[] } | null = null;
   inlinePrompt: { label: string; secret: boolean; value: string; submit: (value: string) => void } | null = null;
+  wantBtwPicker = false;
+  btwSides: { id: string; name: string; updatedAt?: Date }[] = [];
   width = 0;
   height = 0;
 
