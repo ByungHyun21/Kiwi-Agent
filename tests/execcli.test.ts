@@ -87,4 +87,67 @@ describe("kiwi exec", () => {
     expect(code).toBe(1);
     expect(res.code).toBe("badrequest");
   });
+
+  test("run captures exit code and stdout", async () => {
+    const { code, res } = await exec(["run", "echo", "hello"]);
+    expect(code).toBe(0);
+    const data = JSON.parse(res.data as string) as { exitCode: number; stdout: string; stderr: string; timedOut: boolean };
+    expect(data.exitCode).toBe(0);
+    expect(data.stdout).toContain("hello");
+    expect(data.timedOut).toBe(false);
+  });
+
+  test("run reports nonzero exit as ok with exitCode", async () => {
+    const { code, res } = await exec(["run", "sh", "-c", "echo err >&2; exit 3"]);
+    expect(code).toBe(0);
+    const data = JSON.parse(res.data as string) as { exitCode: number; stderr: string };
+    expect(data.exitCode).toBe(3);
+    expect(data.stderr).toContain("err");
+  });
+
+  test("run enforces timeout", async () => {
+    const { res } = await exec(["run", "--timeout", "200", "sleep", "5"]);
+    expect(res.ok).toBe(false);
+    expect(res.code).toBe("timeout");
+  });
+
+  test("grep finds and reports no-match", async () => {
+    await exec(["write", "g.txt"], "alpha\nbeta gamma\n");
+    const hit = await exec(["grep", "beta"]);
+    expect(hit.res.ok).toBe(true);
+    expect(hit.res.data as string).toContain("g.txt");
+    const miss = await exec(["grep", "zeta"]);
+    expect(miss.res.ok).toBe(true);
+    expect(miss.res.data as string).toContain("없음");
+  });
+
+  test("glob matches pattern", async () => {
+    await exec(["write", "a/one.py"], "x");
+    await exec(["write", "a/two.ts"], "x");
+    const { res } = await exec(["glob", "**/*.py"]);
+    expect(res.ok).toBe(true);
+    expect(res.data as string).toContain("one.py");
+    expect(res.data as string).not.toContain("two.ts");
+  });
+
+  test("edit applies unique replacement and returns content", async () => {
+    await exec(["write", "e.txt"], "one\ntwo\nthree\n");
+    const { res } = await exec(["edit", "e.txt"], JSON.stringify({ edits: [{ oldText: "two", newText: "2" }] }));
+    expect(res.ok).toBe(true);
+    const data = JSON.parse(res.data as string) as { applied: number; content: string };
+    expect(data.applied).toBe(1);
+    expect(data.content).toBe("one\n2\nthree\n");
+    expect(readFileSync(path.join(dir, "e.txt"), "utf8")).toBe("one\n2\nthree\n");
+  });
+
+  test("edit rejects missing and ambiguous oldText", async () => {
+    await exec(["write", "e2.txt"], "dup dup\n");
+    const missing = await exec(["edit", "e2.txt"], JSON.stringify({ edits: [{ oldText: "nope", newText: "x" }] }));
+    expect(missing.res.ok).toBe(false);
+    expect(missing.res.code).toBe("badrequest");
+    expect(missing.res.message as string).toContain("찾을 수 없음");
+    const dup = await exec(["edit", "e2.txt"], JSON.stringify({ edits: [{ oldText: "dup", newText: "x" }] }));
+    expect(dup.res.ok).toBe(false);
+    expect(dup.res.message as string).toContain("중복");
+  });
 });

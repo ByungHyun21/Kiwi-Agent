@@ -15,7 +15,7 @@ export const Version = VERSION;
 export async function run(argv: string[], stdin: ReadableStream<Uint8Array> | null, stdout: typeof process.stdout): Promise<number> {
   let res: ExecResult;
   if (argv.length === 0) {
-    res = fail("badrequest", "usage: kiwi exec <read|write|ls|info> [args]");
+    res = fail("badrequest", "usage: kiwi exec <read|write|edit|ls|grep|glob|run|info> [args]");
   } else {
     res = await dispatch(argv, stdin);
   }
@@ -35,8 +35,16 @@ async function dispatch(argv: string[], stdin: ReadableStream<Uint8Array> | null
       return cmdRead(rest);
     case "write":
       return cmdWrite(rest, stdin);
+    case "edit":
+      return cmdEdit(rest, stdin);
     case "ls":
       return cmdLs(rest);
+    case "grep":
+      return cmdGrep(rest);
+    case "glob":
+      return cmdGlob(rest);
+    case "run":
+      return cmdRun(rest);
     case "info":
       return cmdInfo();
     default:
@@ -124,6 +132,158 @@ function cmdLs(argv: string[]): ExecResult {
     b += (e.isDirectory() ? e.name + "/" : e.name) + "\n";
   }
   return { ok: true, data: b };
+}
+
+const MAX_TOOL_OUTPUT = 64 * 1024;
+
+function capOutput(s: string): string {
+  if (s.length <= MAX_TOOL_OUTPUT) return s;
+  return s.slice(0, MAX_TOOL_OUTPUT) + `\n… (${s.length - MAX_TOOL_OUTPUT}자 잘림)`;
+}
+
+async function cmdRun(argv: string[]): Promise<ExecResult> {
+  const args = [...argv];
+  let timeoutMs = 120_000;
+  while (args.length > 0 && args[0] === "--timeout") {
+    if (args.length < 2 || !/^\d+$/.test(args[1]!)) return fail("badrequest", "--timeout requires <ms>");
+    timeoutMs = Math.min(parseInt(args[1]!, 10), 600_000);
+    args.splice(0, 2);
+  }
+  if (args.length === 0) return fail("badrequest", "usage: kiwi exec run [--timeout <ms>] <command> [args…]");
+  const started = Date.now();
+  let proc;
+  try {
+    proc = Bun.spawn(args, { stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+  } catch (err) {
+    return fail("badrequest", "spawn 실패: " + String(err));
+  }
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    proc.kill();
+  }, timeoutMs);
+  let exitCode: number | null;
+  try {
+    exitCode = await proc.exited;
+  } catch {
+    exitCode = -1;
+  } finally {
+    clearTimeout(timer);
+  }
+  const stdout = capOutput(await new Response(proc.stdout).text());
+  const stderr = capOutput(await new Response(proc.stderr).text());
+  if (timedOut) return { ok: false, code: "timeout", message: `timeout after ${timeoutMs}ms`, data: JSON.stringify({ exitCode, stdout, stderr, timedOut, durationMs: Date.now() - started }) };
+  return { ok: true, data: JSON.stringify({ exitCode, stdout, stderr, timedOut, durationMs: Date.now() - started }) };
+}
+
+function cmdGrep(argv: string[]): Promise<ExecResult> {
+  const args = [...argv];
+  let include = "";
+  while (args.length > 0 && args[0] === "--include") {
+    if (args.length < 2) return Promise.resolve(fail("badrequest", "--include requires a glob"));
+    include = args[1]!;
+    args.splice(0, 2);
+  }
+  if (args.length === 0) return Promise.resolve(fail("badrequest", "usage: kiwi exec grep <pattern> [--include <glob>] [path]"));
+  const pattern = args.shift()!;
+  const target = args.shift() ?? ".";
+  const engines: string[][] = [
+    ["rg", "-S", "-n", "--max-count", "50", ...(include ? ["-g", include] : []), "--", pattern, target],
+    ["grep", "-rn", "-E", ...(include ? ["--include", include] : []), "--", pattern, target],
+  ];
+  return tryEngines(engines, pattern);
+}
+
+async function tryEngines(engines: string[][], pattern: string): Promise<ExecResult> {
+  let lastErr: unknown = null;
+  for (const cmd of engines) {
+    let proc;
+    try {
+      proc = Bun.spawn(cmd, { stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+    } catch (err) {
+      lastErr = err;
+      continue;
+    }
+    const exitCode = await proc.exited;
+    const stdout = await new Response(proc.stdout).text();
+    const stderr = await new Response(proc.stderr).text();
+    if (exitCode === 2 && /not found|no such file/i.test(stderr)) {
+      lastErr = stderr;
+      continue;
+    }
+    if (exitCode === 1) return { ok: true, data: "(검색어와 일치하는 결과 없음: " + pattern + ")" };
+    if (exitCode === 0) {
+      const lines = stdout.split("\n").slice(0, 200).join("\n");
+      return { ok: true, data: capOutput(lines) };
+    }
+    return fail("error", `exit ${exitCode}: ${stderr.trim().slice(0, 400)}`);
+  }
+  return fail("error", "검색 엔진 없음(rg/grep): " + String(lastErr));
+}
+
+async function cmdGlob(argv: string[]): Promise<ExecResult> {
+  if (argv.length === 0) return fail("badrequest", "usage: kiwi exec glob <pattern> [path]");
+  const pattern = argv[0]!;
+  const cwd = argv[1] ?? ".";
+  const found: { p: string; mtime: number }[] = [];
+  try {
+    for await (const rel of new Bun.Glob(pattern).scan({ cwd, onlyFiles: false })) {
+      try {
+        found.push({ p: rel, mtime: fs.statSync(path.join(cwd, rel)).mtimeMs });
+      } catch {
+        found.push({ p: rel, mtime: 0 });
+      }
+      if (found.length >= 500) break;
+    }
+  } catch (err) {
+    return errResult(err as NodeJS.ErrnoException);
+  }
+  found.sort((a, b) => b.mtime - a.mtime);
+  const data = found.slice(0, 100).map((f) => f.p).join("\n");
+  return { ok: true, data: data === "" ? "(일치하는 파일 없음: " + pattern + ")" : data };
+}
+
+async function cmdEdit(argv: string[], stdin: ReadableStream<Uint8Array> | null): Promise<ExecResult> {
+  if (argv.length === 0) return fail("badrequest", "usage: kiwi exec edit <path>  (stdin: {\"edits\":[{oldText,newText}]})");
+  const p = argv[0]!;
+  let body: string;
+  try {
+    body = stdin ? await new Response(stdin).text() : "";
+  } catch (err) {
+    return fail("error", "stdin 읽기 실패: " + String(err));
+  }
+  let ops: { oldText: string; newText: string }[];
+  try {
+    const parsed = JSON.parse(body || "{}") as { edits?: { oldText?: string; newText?: string }[] };
+    ops = (parsed.edits ?? []).map((e) => ({ oldText: String(e.oldText ?? ""), newText: String(e.newText ?? "") }));
+  } catch (err) {
+    return fail("badrequest", "edits JSON 파싱 실패: " + String(err));
+  }
+  if (ops.length === 0) return fail("badrequest", "edits 비어 있음");
+  let text: string;
+  try {
+    text = fs.readFileSync(p, "utf8");
+  } catch (err) {
+    return errResult(err);
+  }
+  for (const op of ops) {
+    if (op.oldText === "") return fail("badrequest", "oldText 비어 있음");
+    const count = text.split(op.oldText).length - 1;
+    if (count === 0) return fail("badrequest", `oldText를 찾을 수 없음 (${snippet(op.oldText)})`);
+    if (count > 1) return fail("badrequest", `oldText가 ${count}회 중복 — 유일하지 않음 (${snippet(op.oldText)})`);
+    text = text.replace(op.oldText, op.newText);
+  }
+  try {
+    writeFileAtomic(p, Buffer.from(text, "utf8"), 0o644);
+  } catch (err) {
+    return errResult(err);
+  }
+  return { ok: true, data: JSON.stringify({ applied: ops.length, sha: shaHex(Buffer.from(text, "utf8")), content: text.length > 256 * 1024 ? "(256KB 초과 — 내용 생략)" : text }) };
+}
+
+function snippet(s: string): string {
+  const one = s.replace(/\s+/g, " ").trim();
+  return one.length > 60 ? one.slice(0, 60) + "…" : one;
 }
 
 function cmdInfo(): ExecResult {
