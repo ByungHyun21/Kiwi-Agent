@@ -181,6 +181,7 @@ export function applyEvent(m: Model, ev: Event): void {
         m.ctxUsed = ev.state.ctxUsed;
         m.ctxMax = ev.state.ctxMax;
         if (ev.state.tokens > 0) m.tokens = ev.state.tokens;
+        if (ev.state.todos) m.todos = ev.state.todos;
       }
       break;
     case "history":
@@ -191,8 +192,18 @@ export function applyEvent(m: Model, ev: Event): void {
         m.transcript.push(tline(historyKind(h.kind), h.text));
       }
       break;
+    case "cat":
+      if (ev.error) {
+        m.transcript.push(tline(LineKind.Error, "cat: " + ev.error));
+        break;
+      }
+      m.catView = { path: ev.name ?? "", lines: (ev.result ?? "").split("\n"), scroll: 0 };
+      break;
     case "sessions":
-      m.sessions = (ev.sessions ?? []).map((s) => s.name);
+      m.sessions = (ev.sessions ?? []).map((s) => {
+        const folder = lastFolder(s.workdir || "") || s.project || "";
+        return folder !== "" ? folder + " " + s.name : s.name;
+      });
       m.sessionIDs = ev.sessions ?? [];
       break;
   }
@@ -233,6 +244,10 @@ function statusText(name: string): string {
       return "작업을 중단했습니다";
     case "compacted":
       return "컨텍스트를 압축했습니다";
+    case "session-moved":
+      return "세션 작업 폴더를 변경했습니다";
+    case "session-host-moved":
+      return "세션 머신을 변경했습니다";
     default:
       return name;
   }
@@ -286,3 +301,8 @@ export function scrollBy(m: Model, width: number, height: number, delta: number)
 }
 
 export { truncateAnsi, displayWidth };
+
+function lastFolder(workdir: string): string {
+  const parts = workdir.split("/").filter((p) => p !== "");
+  return parts.length > 0 ? parts[parts.length - 1]! : "";
+}

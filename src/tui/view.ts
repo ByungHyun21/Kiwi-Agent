@@ -31,6 +31,7 @@ export function view(m: Model): string {
   // force the full column width even when the transcript is empty
   let left: string;
   if (m.menu !== null) left = m.menu.render(l.leftW, l.bodyH);
+  else if (m.catView !== null) left = renderCatView(m, l.leftW, l.bodyH);
   else left = renderTranscript(m, l.leftW, l.bodyH);
   left = new Style().width(l.leftW).maxHeight(l.bodyH).render(left);
 
@@ -49,7 +50,9 @@ export function view(m: Model): string {
   const helpRight = hintStyle.render(t.HelpRight);
   const help = padRight(helpLeft, Math.max(10, l.width - 2) - displayWidth(helpRight)) + helpRight;
 
-  const cols = [body, divider, m.msgIn.view()];
+  const cols = [body, divider];
+  if (m.inlinePrompt !== null) cols.push(inlinePromptView(m));
+  cols.push(m.msgIn.view());
   const sp = spinnerLine(m);
   if (sp !== "") cols.push(sp);
   if (l.popupLines > 0) cols.push(popupView(m, l.width));
@@ -66,10 +69,27 @@ function statusBadge(m: Model): string {
 /** spinnerLine is the busy indicator shown above the input. */
 function spinnerLine(m: Model): string {
   if (!m.busy) return "";
-  let label = " 진행 중…";
-  if (m.curTool !== "") label = " 진행 중… ⚒ " + m.curTool;
+  let label = " 진행 중… · Esc 정지";
+  if (m.curTool !== "") label = " 진행 중… ⚒ " + m.curTool + " · Esc 정지";
   return new Style()
     .foreground("#a8c17a")
     .bold(true)
     .render(spinnerFrames[m.spinner]! + label);
+}
+
+function renderCatView(m: Model, width: number, height: number): string {
+  const v = m.catView!;
+  const header = `── cat: ${v.path} · PgUp/PgDn 스크롤 · Esc 닫기 `;
+  const headerLine = hintStyle.render(header + "─".repeat(Math.max(0, width - displayWidth(header) - 1)));
+  const visible: string[] = [];
+  for (let i = v.scroll; i < Math.min(v.lines.length, v.scroll + Math.max(1, height - 1)); i++) {
+    visible.push(v.lines[i] ?? "");
+  }
+  return [headerLine, ...visible].join("\n");
+}
+
+function inlinePromptView(m: Model): string {
+  const p = m.inlinePrompt!;
+  const shown = p.secret ? "•".repeat(Array.from(p.value).length) : p.value;
+  return hintStyle.render(`${p.label} ${shown}▏`);
 }

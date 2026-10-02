@@ -53,6 +53,32 @@ export async function apiRoutes(s: KiwiServer, req: Request, url: URL): Promise<
     s.store.saveMachine(m);
     return json(m);
   }
+  if (seg[0] === "api" && seg[1] === "machines" && seg.length === 4 && seg[3] === "auth" && method === "PUT") {
+    let body: { user?: string; password?: string };
+    try {
+      body = (await req.json()) as { user?: string; password?: string };
+    } catch {
+      return fail("bad body", 400);
+    }
+    if (!body.user || !body.password) return fail("user, password required", 400);
+    const name = decodeURIComponent(seg[2]!);
+    try {
+      s.store.machine(name);
+    } catch {
+      return fail("machine not found", 404);
+    }
+    s.store.saveMachineAuth(name, body.user, body.password);
+    let connected = false;
+    let probe = "";
+    try {
+      const res = await s.runner.run(s.store.machine(name), ".", ["info"], null, undefined);
+      connected = res.ok;
+      if (!res.ok) probe = res.code ?? res.message ?? "";
+    } catch (err) {
+      probe = String(err);
+    }
+    return json({ ok: true, connected, probe });
+  }
   if (seg[0] === "api" && seg[1] === "machines" && seg.length === 3 && method === "DELETE") {
     s.store.deleteMachine(decodeURIComponent(seg[2]!));
     return new Response(null, { status: 204 });

@@ -182,7 +182,8 @@ export class KiwiServer {
     try {
       const p = this.store.project(sess.projectId);
       state.project = p.name;
-      state.machine = p.machine;
+      const loc = this.store.sessionLocation(sessionID);
+      state.machine = loc.machine || p.machine;
     } catch {
       // ignore
     }

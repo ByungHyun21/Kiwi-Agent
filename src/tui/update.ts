@@ -84,7 +84,15 @@ export function update(m: Model, msg: unknown): Cmd[] {
     }
     case "wsEvent": {
       const wasBusy = m.busy;
-      applyEvent(m, (msg as { ev: Event }).ev);
+      const ev = (msg as { ev: Event }).ev;
+      applyEvent(m, ev);
+      if (ev.type === "done" || ev.type === "error") {
+        process.stdout.write("\x07\x1b]9;kiwi\x1b\\");
+      }
+      if (ev.type === "path_complete") {
+        const head = pathArgPrefix(m.msgIn.getValue());
+        m.pathCands = { replaceFrom: head ?? "", items: ev.candidates ?? [] };
+      }
       const cmds: Cmd[] = [];
       if (m.busy && !wasBusy) cmds.push(tick());
       return cmds;
@@ -187,6 +195,7 @@ export function update(m: Model, msg: unknown): Cmd[] {
       return [fetchRole(m.addr, m.token), fetchMachines(m.addr, m.token)];
     }
     case "key":
+      if (m.inlinePrompt !== null) return updateInlineKeys(m, msg as KeyMsg);
       if (m.menu !== null) return updateMenu(m, msg as KeyMsg);
       return updateKeys(m, msg as KeyMsg);
     case "mouseWheel": {
@@ -238,10 +247,26 @@ function updateKeys(m: Model, msg: KeyMsg): Cmd[] {
 
   const l = layoutOf(m);
   switch (msg.type) {
+    case "tab": {
+      const head = pathArgPrefix(m.msgIn.getValue());
+      if (head !== null && m.client) {
+        return orEmpty(sendCmd(m.client, { type: "path_complete", text: m.msgIn.getValue().slice(head.length) }));
+      }
+      return [];
+    }
     case "pgup":
+      if (m.catView !== null) {
+        m.catView.scroll = Math.max(0, m.catView.scroll - 10);
+        return [];
+      }
       scrollBy(m, l.leftW, l.bodyH, -5);
       return [];
     case "pgdown":
+      if (m.catView !== null) {
+        const max = Math.max(0, m.catView.lines.length - (l.bodyH - 1));
+        m.catView.scroll = Math.min(max, m.catView.scroll + 10);
+        return [];
+      }
       scrollBy(m, l.leftW, l.bodyH, 5);
       return [];
     case "ctrl+c":
@@ -250,13 +275,24 @@ function updateKeys(m: Model, msg: KeyMsg): Cmd[] {
       m.notice = "";
       return [];
     case "esc":
-      // /stop surface behavior: consume quietly
-      m.msgIn.setValue("");
+      if (m.catView !== null) {
+        m.catView = null;
+        return [];
+      }
+      if (m.msgIn.getValue() !== "") {
+        m.msgIn.setValue("");
+        m.notice = "";
+        return [];
+      }
+      if (m.busy && m.client) {
+        return orEmpty(sendCmd(m.client, { type: "stop" }));
+      }
       m.notice = "";
       return [];
     case "enter":
       return runCommand(m, m.msgIn.getValue());
     default: {
+      m.pathCands = null;
       m.msgIn.update(msg);
       m.msgIn.setValue(sanitizeInput(m.msgIn.getValue()));
       m.popupGone = false;
@@ -278,3 +314,35 @@ function wire(m: Model): void {
 }
 
 export { execAction };
+
+function pathArgPrefix(v: string): string | null {
+  for (const head of ["/cd ", "/cat ", "/session cd "]) {
+    if (v.startsWith(head)) return head;
+  }
+  return null;
+}
+
+function updateInlineKeys(m: Model, msg: KeyMsg): Cmd[] {
+  const p = m.inlinePrompt!;
+  switch (msg.type) {
+    case "esc":
+      m.inlinePrompt = null;
+      return [];
+    case "enter":
+      m.inlinePrompt = null;
+      if (p.value !== "") p.submit(p.value);
+      return [];
+    case "backspace":
+      p.value = Array.from(p.value).slice(0, -1).join("");
+      return [];
+    case "runes":
+      p.value += (msg as { runes?: string[] }).runes?.join("") ?? "";
+      return [];
+    default:
+      return [];
+  }
+}
+
+function orEmpty(cmd: Cmd): Cmd[] {
+  return cmd ? [cmd] : [];
+}

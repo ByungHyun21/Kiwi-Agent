@@ -52,6 +52,9 @@ export class Model {
   popupSel = 0;
   popupGone = false;
   menu: Menu | null = null;
+  catView: { path: string; lines: string[]; scroll: number } | null = null;
+  pathCands: { replaceFrom: string; items: string[] } | null = null;
+  inlinePrompt: { label: string; secret: boolean; value: string; submit: (value: string) => void } | null = null;
   width = 0;
   height = 0;
 
@@ -64,6 +67,10 @@ export class Model {
 
   hasServer(): boolean {
     return this.addr !== "";
+  }
+
+  startInlinePrompt(label: string, secret: boolean, submit: (value: string) => void): void {
+    this.inlinePrompt = { label, secret, value: "", submit };
   }
 
   /** machineDefault / workdirDefault fill project creation defaults. */
