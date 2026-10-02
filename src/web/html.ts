@@ -358,6 +358,119 @@ export function settingsPage(token: string, provider: string, baseURL: string, m
   );
 }
 
+export function chatPage(defaultToken: string): string {
+  return `<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>채팅 · Kiwi Server</title>
+  <style>
+    body { margin:0; background:#141613; color:#e8eadf; font:14px/1.5 system-ui,sans-serif; display:flex; flex-direction:column; height:100vh; }
+    header { padding:10px 16px; border-bottom:1px solid #2a2d28; display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+    header b { color:#8fce5a; letter-spacing:2px; }
+    #status { font-size:12px; color:#b9b39f; }
+    #state { font-size:12px; color:#7d8377; margin-left:auto; text-align:right; }
+    #log { flex:1; overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:6px; }
+    .u { align-self:flex-end; background:#2a3324; padding:6px 12px; border-radius:12px 12px 2px 12px; max-width:70%; white-space:pre-wrap; }
+    .a { align-self:flex-start; background:#1e201c; padding:6px 12px; border-radius:12px 12px 12px 2px; max-width:70%; white-space:pre-wrap; }
+    .r { align-self:flex-start; color:#7d8377; font-size:12px; max-width:70%; white-space:pre-wrap; }
+    .t { align-self:flex-start; color:#a8c17a; font-size:12px; max-width:95%; white-space:pre-wrap; border-left:2px solid #4a5240; padding-left:8px; }
+    .e { color:#e07a5f; }
+    form { display:flex; gap:8px; padding:12px 16px; border-top:1px solid #2a2d28; }
+    input[type=text] { flex:1; background:#1e201c; border:1px solid #2a2d28; color:#e8eadf; border-radius:8px; padding:8px 12px; font:inherit; }
+    button { background:#8fce5a; color:#141613; border:0; border-radius:8px; padding:8px 14px; font:inherit; font-weight:600; cursor:pointer; }
+    button.ghost { background:#2a2d28; color:#e8eadf; }
+    select { background:#1e201c; color:#e8eadf; border:1px solid #2a2d28; border-radius:6px; padding:4px; }
+  </style>
+</head>
+<body>
+  <header>
+    <b>KIWI</b> 채팅
+    <select id="project"></select>
+    <button class="ghost" id="newSession" type="button">새 세션</button>
+    <button class="ghost" id="stopBtn" type="button">정지</button>
+    <span id="status">연결 중…</span>
+    <span id="state"></span>
+  </header>
+  <div id="log"></div>
+  <form id="f"><input type="text" id="msg" placeholder="메시지 입력" autocomplete="off"/><button>전송</button></form>
+  <script>
+    const q = new URLSearchParams(location.search);
+    const token = q.get("token") || localStorage.getItem("kiwi-token") || " + esc(defaultToken) + ";
+    localStorage.setItem("kiwi-token", token);
+    const log = document.getElementById("log");
+    const statusEl = document.getElementById("status");
+    const stateEl = document.getElementById("state");
+    const projectSel = document.getElementById("project");
+    let ws = null, busy = false, streamLine = null;
+
+    function line(cls, text) {
+      const d = document.createElement("div");
+      d.className = cls; d.textContent = text;
+      log.appendChild(d); log.scrollTop = log.scrollHeight;
+      return d;
+    }
+    function append(kind, text) {
+      if (!streamLine || streamLine.dataset.k !== kind) { streamLine = line(kind, ""); streamLine.dataset.k = kind; }
+      streamLine.textContent += text;
+      log.scrollTop = log.scrollHeight;
+    }
+    function connect() {
+      const proto = location.protocol === "https:" ? "wss" : "ws";
+      ws = new WebSocket(proto + "://" + location.host + "/ws?token=" + encodeURIComponent(token));
+      ws.onopen = () => { statusEl.textContent = "연결됨"; };
+      ws.onclose = () => { statusEl.textContent = "끊김 — 재접속"; setTimeout(connect, 2000); };
+      ws.onerror = () => { statusEl.textContent = "연결 오류 (토큰 확인)"; };
+      ws.onmessage = (e) => {
+        const ev = JSON.parse(e.data);
+        switch (ev.type) {
+          case "hello": loadProjects(); break;
+          case "delta": append("a", ev.text); break;
+          case "reasoning": append("r", ev.text); break;
+          case "tool_call": streamLine = null; line("t", "⚒ " + ev.name + " " + (ev.args || "").slice(0, 120)); break;
+          case "tool_result": line("t", ev.result || ""); break;
+          case "status": busy = ev.name === "working"; statusEl.textContent = ev.name || ""; if (ev.name === "idle") streamLine = null; break;
+          case "state": stateEl.textContent = (ev.state?.project || "") + " · " + (ev.state?.machine || "") + " · " + (ev.state?.model || "") + " · ctx " + (ev.state?.ctxUsed || 0) + "/" + (ev.state?.ctxMax || 0); break;
+          case "history": log.innerHTML = ""; streamLine = null; (ev.history || []).forEach(h => line(h.kind === "user" ? "u" : h.kind === "tool" || h.kind === "result" ? "t" : h.kind === "notice" ? "r" : "a", h.text)); break;
+          case "error": line("e", ev.error || ""); break;
+        }
+      };
+    }
+    async function loadProjects() {
+      try {
+        const res = await fetch("/api/projects", { headers: { Authorization: "Bearer " + token } });
+        const projects = await res.json();
+        projectSel.innerHTML = "";
+        for (const p of projects) {
+          const o = document.createElement("option");
+          o.value = p.name; o.textContent = p.name;
+          projectSel.appendChild(o);
+        }
+      } catch {}
+    }
+    projectSel.onchange = () => ws && ws.send(JSON.stringify({ type: "project", text: projectSel.value }));
+    document.getElementById("newSession").onclick = () => {
+      streamLine = null;
+      if (projectSel.value) ws.send(JSON.stringify({ type: "project", text: projectSel.value }));
+      ws.send(JSON.stringify({ type: "new", text: "web" }));
+    };
+    document.getElementById("stopBtn").onclick = () => ws && ws.send(JSON.stringify({ type: "stop" }));
+    document.getElementById("f").onsubmit = (e) => {
+      e.preventDefault();
+      const input = document.getElementById("msg");
+      const text = input.value.trim();
+      if (!text || !ws) return;
+      line("u", text);
+      ws.send(JSON.stringify({ type: "send", text }));
+      input.value = "";
+      streamLine = null;
+    };
+    connect();
+  </script>
+</body>
+</html>`;
+}
 export function docsPage(): string {
   return layout(
     "자료",

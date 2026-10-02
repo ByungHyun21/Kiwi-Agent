@@ -7,6 +7,7 @@ import type { Machine, PanelState } from "../protocol.ts";
 import type { Runner } from "../ssh.ts";
 import { Store } from "../store.ts";
 import {
+  chatPage,
   dashboardPage,
   machinesPage,
   docsPage,
@@ -86,6 +87,8 @@ export class KiwiServer {
           }
           return html(settingsPage(this.token, provider, baseURL, model));
         }
+        case "/chat":
+          return html(chatPage(this.token));
         case "/docs":
           return html(docsPage());
       }
