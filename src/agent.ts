@@ -215,6 +215,34 @@ export class Agent {
         if (!res.ok) return `오류 (${res.code}): ${res.message}`;
         return res.data ?? "";
       }
+      case "lsp_status": {
+        const res = await this.runner.run(this.machine, this.workdir, ["lsp", "status", str("lang") || "typescript"], null, signal);
+        if (!res.ok) return `오류 (${res.code}): ${res.message}`;
+        return res.data ?? "";
+      }
+      case "lsp_diagnostics": {
+        if (!safePath(p)) return pathErr(p);
+        const res = await this.runner.run(this.machine, this.workdir, ["lsp", "diagnostics", p], null, signal);
+        if (!res.ok) return `오류 (${res.code}): ${res.message}`;
+        return res.data ?? "";
+      }
+      case "lsp_definition":
+      case "lsp_references": {
+        if (!safePath(p)) return pathErr(p);
+        const line = int("line");
+        const character = int("character");
+        if (!line || !character) return "오류: line과 character(1-based)가 필요합니다";
+        const sub = tc.name === "lsp_definition" ? "definition" : "references";
+        const res = await this.runner.run(this.machine, this.workdir, ["lsp", sub, p, String(line), String(character)], null, signal);
+        if (!res.ok) return `오류 (${res.code}): ${res.message}`;
+        return res.data ?? "";
+      }
+      case "lsp_symbols": {
+        if (!safePath(p)) return pathErr(p);
+        const res = await this.runner.run(this.machine, this.workdir, ["lsp", "symbols", p], null, signal);
+        if (!res.ok) return `오류 (${res.code}): ${res.message}`;
+        return res.data ?? "";
+      }
       case "run": {
         const argv = tokenize(str("command"));
         if (argv.length === 0) return "오류: command가 비어 있습니다";
@@ -316,7 +344,8 @@ const systemPrompt = `당신은 코딩 에이전트입니다. 도구로 작업 �
 - 서로 의존하지 않는 읽기(read_file, list_dir, grep, glob, session_search, session_read)는 한 응답에 여러 개 함께 호출하면 병렬로 실행됩니다.
 - 과거 세션 기록은 session_search로 검색하고 session_read로 읽을 수 있습니다.
 - read_file에 tagged:true를 주면 각 줄이 "N#TAG│ 내용" 형태로 옵니다. 정밀 줄 수정은 edit의 lineEdits([{pos:"N#TAG", op:"replace"|"insertBefore"|"insertAfter"|"delete", newText}])로 하세요 — 읽은 뒤 줄이 바뀌었으면 거부(stale)됩니다.
-- 오래 걸리는 명령(서버 기동, 로그 감시)은 monitor_start로 시작하고 monitor_output으로 새 출력을 받아오고(아직 running이면 잠시 후 다시) monitor_stop으로 중지합니다. monitor_list로 목록을 봅니다.`;
+- 오래 걸리는 명령(서버 기동, 로그 감시)은 monitor_start로 시작하고 monitor_output으로 새 출력을 받아오고(아직 running이면 잠시 후 다시) monitor_stop으로 중지합니다. monitor_list로 목록을 봅니다.
+- 코드 오류 확인은 lsp_diagnostics, 정의/참조는 lsp_definition/lsp_references(line·character 1-based), 심볼 목록은 lsp_symbols를 사용하세요(작업 머신의 언어서버가 기동됩니다).`;
 
 /** SystemPrompt exposes the agent system prompt (used by side channels). */
 export function systemPromptText(): string {
@@ -420,6 +449,64 @@ const agentTools: Tool[] = [
     },
   },
   {
+    name: "lsp_status",
+    description: "LSP 데몬(작업 머신의 언어서버) 상태를 조회합니다.",
+    parameters: {
+      type: "object",
+      properties: {
+        lang: { type: "string", description: "기본값: typescript" },
+      },
+    },
+  },
+  {
+    name: "lsp_diagnostics",
+    description: "파일의 컴파일/정적 오류를 언어서버 진단으로 조회합니다(ts/py/go/rust/c/cpp/cs/java/js). 첫 호출은 서버 기동에 수 초~수십 초 걸릴 수 있습니다.",
+    parameters: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "상대 경로" },
+      },
+      required: ["path"],
+    },
+  },
+  {
+    name: "lsp_definition",
+    description: "심볼의 정의 위치로 이동 정보를 얻습니다. line/character는 1-based.",
+    parameters: {
+      type: "object",
+      properties: {
+        path: { type: "string" },
+        line: { type: "number" },
+        character: { type: "number" },
+      },
+      required: ["path", "line", "character"],
+    },
+  },
+  {
+    name: "lsp_references",
+    description: "심볼의 모든 참조 위치를 조회합니다. line/character는 1-based.",
+    parameters: {
+      type: "object",
+      properties: {
+        path: { type: "string" },
+        line: { type: "number" },
+        character: { type: "number" },
+      },
+      required: ["path", "line", "character"],
+    },
+  },
+  {
+    name: "lsp_symbols",
+    description: "파일의 심볼 목록(이름·종류·줄)을 조회합니다.",
+    parameters: {
+      type: "object",
+      properties: {
+        path: { type: "string" },
+      },
+      required: ["path"],
+    },
+  },
+  {
     name: "monitor_start",
     description: "셸 명령을 백그라운드에서 시작하고 감시합니다(서버 기동, 로그 감시 등). 즉시 monitor id를 반환합니다.",
     parameters: {
@@ -498,7 +585,7 @@ const agentTools: Tool[] = [
   },
 ];
 
-const READ_ONLY_TOOLS = new Set(["read_file", "list_dir", "grep", "glob", "session_search", "session_read", "monitor_output", "monitor_list"]);
+const READ_ONLY_TOOLS = new Set(["read_file", "list_dir", "grep", "glob", "session_search", "session_read", "monitor_output", "monitor_list", "lsp_status", "lsp_diagnostics", "lsp_definition", "lsp_references", "lsp_symbols"]);
 
 function pathErr(p: string): string {
   return "오류: 경로는 작업 폴더 안의 상대 경로여야 합니다: " + p;
