@@ -34,6 +34,7 @@ export interface SessionInfo {
   id: string;
   name: string;
   project?: string;
+  workdir?: string; // session's own workdir (T01); last segment shown in lists
   updatedAt?: Date;
 }
 
@@ -62,6 +63,8 @@ export const EvStatus = "status"; // working | idle
 export const EvSessions = "sessions";
 export const EvState = "state";
 export const EvHistory = "history"; // replay of a resumed session
+export const EvCat = "cat"; // /cat viewer content
+export const EvPathComplete = "path_complete"; // tab-completion candidates
 
 /** HistoryEntry is one replayed transcript entry for a resumed session. */
 export interface HistoryEntry {
@@ -81,6 +84,7 @@ export interface Event {
   sessions?: SessionInfo[];
   state?: PanelState;
   history?: HistoryEntry[];
+  candidates?: string[]; // path completion candidates
 }
 
 // Client→server WS message types.
@@ -94,6 +98,10 @@ export const MsgSetGoal = "set_goal";
 export const MsgProject = "project";
 export const MsgCompact = "compact";
 export const MsgBtw = "btw";
+export const MsgSessionCd = "session_cd";
+export const MsgSessionHost = "session_host";
+export const MsgCat = "cat";
+export const MsgPathComplete = "path_complete";
 
 /** ClientMsg is a client→server WS message. */
 export interface ClientMsg {

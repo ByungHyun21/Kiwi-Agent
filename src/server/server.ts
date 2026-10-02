@@ -114,14 +114,28 @@ export class KiwiServer {
     } catch {
       throw new Error("프로젝트를 찾을 수 없습니다");
     }
-    let machine: Machine;
+    const loc = this.execFor(sessionID, project.id);
+    const client = this.llmForRole("agent-chat");
+    return new Agent({ llm: client, runner: this.runner, machine: loc.machine, workdir: loc.workdir, store: this.store });
+  }
+
+  /** execFor resolves a session's machine/workdir with project fallback (T01). */
+  execFor(sessionID: string, projectId: number): { machine: Machine; workdir: string } {
+    let machineName = "";
+    let workdir = "";
+    if (sessionID !== "") {
+      const loc = this.store.sessionLocation(sessionID);
+      machineName = loc.machine;
+      workdir = loc.workdir;
+    }
+    const project = this.store.project(projectId);
+    if (machineName === "") machineName = project.machine;
+    if (workdir === "") workdir = project.workdir;
     try {
-      machine = this.store.machine(project.machine);
+      return { machine: this.store.machine(machineName), workdir };
     } catch {
       throw new Error("기기를 찾을 수 없습니다");
     }
-    const client = this.llmForRole("agent-chat");
-    return new Agent({ llm: client, runner: this.runner, machine, workdir: project.workdir, store: this.store });
   }
 
   /** llmForRole resolves a role to a provider client. */

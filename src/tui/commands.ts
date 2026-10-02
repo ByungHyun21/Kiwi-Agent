@@ -12,26 +12,27 @@ export interface Command {
 export const commands: Command[] = [
   { name: "/project", alias: "" },
   { name: "/new", alias: "" },
-  { name: "/resume", alias: "" },
-  { name: "/stop", alias: "esc" },
   { name: "/server", alias: "" },
-  { name: "/exit", alias: "" },
-  { name: "/skill", alias: "" },
+  { name: "/session", alias: "" },
+  { name: "/cd", alias: "" },
+  { name: "/cat", alias: "" },
   { name: "/model", alias: "" },
   { name: "/btw", alias: "" },
   { name: "/update", alias: "" },
   { name: "/goal", alias: "" },
-  { name: "/queue", alias: "/q" },
-  { name: "/usage", alias: "" },
+  { name: "/compact", alias: "" },
+  { name: "/language", alias: "" },
+  { name: "/exit", alias: "" },
+  { name: "/skill", alias: "" },
   { name: "/git", alias: "" },
   { name: "/mcp", alias: "" },
-  { name: "/compact", alias: "" },
-  { name: "/rename", alias: "" },
   { name: "/init", alias: "" },
-  { name: "/language", alias: "" },
 ];
 
 export const gitSubcommands = ["branch", "fork", "commit", "log", "status"];
+export const sessionSubcommands = ["new", "cd", "host", "rename", "resume"];
+export const projectSubcommands = ["new"];
+export const serverSubcommands = ["open"];
 
 /** popupItem is one row of the command popup. */
 export interface PopupItem {
@@ -46,27 +47,22 @@ export function candidates(m: Model): PopupItem[] {
   const v = m.msgIn.getValue();
   if (!v.startsWith("/")) return [];
 
-  if (v.startsWith("/language ")) {
-    const arg = v.slice("/language ".length);
-    if (arg === "") {
-      return langOrder.map((l) => ({ left: `/language ${l}`, name: l, alias: "", desc: langNames[l] }));
-    }
-    if (arg.includes(" ")) return [];
-    return langOrder
-      .filter((l) => l.startsWith(arg))
-      .map((l) => ({ left: `/language ${l}`, name: l, alias: "", desc: langNames[l] }));
+  if (m.pathCands && v.startsWith(m.pathCands.replaceFrom)) {
+    return m.pathCands.items.map((c) => ({ left: m.pathCands!.replaceFrom + c, name: c, alias: "", desc: "" }));
   }
 
-  if (v.startsWith("/git ")) {
-    const arg = v.slice("/git ".length);
-    if (arg === "") {
-      return gitSubcommands.map((s) => ({ left: `/git ${s}`, name: s, alias: "", desc: "" }));
-    }
-    if (arg.includes(" ")) return [];
-    return gitSubcommands
-      .filter((s) => s.startsWith(arg))
-      .map((s) => ({ left: `/git ${s}`, name: s, alias: "", desc: "" }));
-  }
+  const sub = (head: string, subs: string[]): PopupItem[] => {
+    const rest = v.slice(head.length);
+    if (rest === "") return subs.map((s) => ({ left: head + s, name: s, alias: "", desc: "" }));
+    if (rest.includes(" ")) return [];
+    return subs.filter((s) => s.startsWith(rest)).map((s) => ({ left: head + s, name: s, alias: "", desc: "" }));
+  };
+
+  if (v.startsWith("/language ")) return sub("/language ", langOrder).map((it) => ({ ...it, name: it.name, desc: langNames[it.name as keyof typeof langNames] ?? "" }));
+  if (v.startsWith("/git ")) return sub("/git ", gitSubcommands);
+  if (v.startsWith("/project ")) return sub("/project ", projectSubcommands);
+  if (v.startsWith("/server ")) return sub("/server ", serverSubcommands);
+  if (v.startsWith("/session ") && !v.startsWith("/session cd ")) return sub("/session ", sessionSubcommands);
 
   if (v.includes(" ")) return []; // command already complete, typing arguments
   const t = translations[m.lang];

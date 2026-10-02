@@ -7,11 +7,17 @@ import {
   EvHello,
   EvHistory,
   EvReasoning,
+  EvCat,
+  EvPathComplete,
   EvSessions,
   EvState,
   EvStatus,
   HistoryEntry,
   MsgBtw,
+  MsgCat,
+  MsgPathComplete,
+  MsgSessionCd,
+  MsgSessionHost,
   MsgCompact,
   MsgNew,
   MsgProject,
@@ -26,7 +32,7 @@ import {
   type PanelState,
   type SessionInfo,
 } from "../protocol.ts";
-import { Agent, systemPromptText } from "../agent.ts";
+import { Agent, safePath, systemPromptText } from "../agent.ts";
 import type { Message } from "../store.ts";
 import type { KiwiServer } from "./server.ts";
 
@@ -166,7 +172,78 @@ export class Conn {
         if (this.sess === "") return;
         this.runBtw(msg.text ?? "");
         return;
+      case MsgSessionCd: {
+        const p = msg.text ?? "";
+        if (this.sess === "" || p === "") return;
+        this.srv.store.setSessionLocation(this.sess, { workdir: p });
+        this.pushState();
+        this.send({ type: EvStatus, name: "session-moved" });
+        return;
+      }
+      case MsgSessionHost: {
+        const name = msg.text ?? "";
+        if (this.sess === "" || name === "") return;
+        try {
+          this.srv.store.machine(name);
+        } catch {
+          this.send({ type: EvError, error: "등록되지 않은 머신: " + name });
+          return;
+        }
+        this.srv.store.setSessionLocation(this.sess, { machine: name });
+        this.pushState();
+        this.send({ type: EvStatus, name: "session-host-moved" });
+        return;
+      }
+      case MsgCat:
+        void this.runCat(msg.text ?? "");
+        return;
+      case MsgPathComplete:
+        void this.runPathComplete(msg.text ?? "");
+        return;
     }
+  }
+
+  /** runCat streams a file into the TUI viewer without touching the agent context. */
+  private async runCat(p: string): Promise<void> {
+    if (!safePath(p)) {
+      this.send({ type: EvCat, name: p, result: "", error: "경로는 작업 폴더 안의 상대 경로여야 합니다: " + p });
+      return;
+    }
+    let loc;
+    try {
+      loc = this.srv.execFor(this.sess, this.projID);
+    } catch (err) {
+      this.send({ type: EvCat, name: p, result: "", error: err instanceof Error ? err.message : String(err) });
+      return;
+    }
+    const res = await this.srv.runner.run(loc.machine, loc.workdir, ["read", p], null, undefined);
+    if (!res.ok) this.send({ type: EvCat, name: p, result: "", error: `오류 (${res.code}): ${res.message}` });
+    else this.send({ type: EvCat, name: p, result: res.data ?? "" });
+  }
+
+  /** runPathComplete returns ls-based path candidates for tab completion. */
+  private async runPathComplete(partial: string): Promise<void> {
+    if (partial.startsWith("/") || partial.includes("..")) {
+      this.send({ type: EvPathComplete, text: partial, candidates: [] });
+      return;
+    }
+    const slash = partial.lastIndexOf("/");
+    const dir = slash >= 0 ? partial.slice(0, slash + 1) : "";
+    const prefix = slash >= 0 ? partial.slice(slash + 1) : partial;
+    let loc;
+    try {
+      loc = this.srv.execFor(this.sess, this.projID);
+    } catch {
+      this.send({ type: EvPathComplete, text: partial, candidates: [] });
+      return;
+    }
+    const res = await this.srv.runner.run(loc.machine, loc.workdir, dir === "" ? ["ls"] : ["ls", dir], null, undefined);
+    if (!res.ok) {
+      this.send({ type: EvPathComplete, text: partial, candidates: [] });
+      return;
+    }
+    const candidates = (res.data ?? "").split("\n").filter((n) => n !== "" && n.startsWith(prefix)).slice(0, 20).map((n) => dir + n);
+    this.send({ type: EvPathComplete, text: partial, candidates });
   }
 
   /** runTurn executes one agent turn, auto-compacts if needed, drains the queue. */
@@ -258,9 +335,17 @@ export class Conn {
     } catch {
       return;
     }
-    const history = this.srv.store.messages(this.sess);
+    const recent = this.srv.store.messages(this.sess).slice(-64);
+    const kept: Message[] = [];
+    let budget = 64 * 1024;
+    for (let i = recent.length - 1; i >= 0; i--) {
+      const m = recent[i]!;
+      if (budget - m.content.length < 0) break;
+      budget -= m.content.length;
+      kept.unshift(m);
+    }
     const msgs = [{ role: "system", content: systemPromptText() } as Message];
-    for (const m of history) {
+    for (const m of kept) {
       msgs.push({ role: m.role, content: m.content, toolCallID: m.toolCallID, name: m.name });
     }
     msgs.push({ role: "user", content: "(사이드 질문, 세션 기록에 반영하지 않음) " + text });

@@ -329,7 +329,7 @@ export class Store {
 
   /** Sessions lists sessions, newest first, optionally filtered by project. */
   sessions(projectId: number): SessionInfo[] {
-    let q = `SELECT s.id, s.name, p.name AS project, s.updated_at FROM sessions s JOIN projects p ON p.id = s.project_id`;
+    let q = `SELECT s.id, s.name, p.name AS project, s.workdir AS workdir, s.updated_at FROM sessions s JOIN projects p ON p.id = s.project_id`;
     const params: SQLQueryBindings[] = [];
     if (projectId > 0) {
       q += ` WHERE s.project_id=?`;
@@ -341,6 +341,7 @@ export class Store {
       id: r.id,
       name: r.name,
       project: r.project,
+      workdir: (r as { workdir?: string }).workdir ?? "",
       updatedAt: new Date(r.updated_at * 1000),
     }));
   }
@@ -477,6 +478,17 @@ export class Store {
   /** Enqueue appends a prompt to a session queue. */
   enqueue(sessionID: string, prompt: string): void {
     this.db.run(`INSERT INTO queue(session_id, prompt) VALUES(?,?)`, [sessionID, prompt]);
+  }
+
+  /** DrainQueue pops every queued prompt in FIFO order (T02). */
+  drainQueue(sessionID: string): string[] {
+    const out: string[] = [];
+    for (;;) {
+      const next = this.dequeue(sessionID);
+      if (next == null) break;
+      out.push(next);
+    }
+    return out;
   }
 
   /** Dequeue pops the oldest queued prompt, null when none. */

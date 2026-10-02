@@ -43,6 +43,9 @@ export class Agent {
 
     const sys = await this.systemMessage(signal);
     for (let iter = 0; iter < maxIter; iter++) {
+      for (const q of this.store.drainQueue(sessionID)) {
+        this.store.appendMessage(sessionID, { role: "user", content: q });
+      }
       const history = this.store.messages(sessionID);
       const msgs = [{ role: "system", content: sys } as Message];
       for (const m of history) {

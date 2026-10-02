@@ -1,8 +1,9 @@
-// Slash command execution (port of cmdexec.go).
+// Slash command execution: T04 command set (project/new/server/exit/model/
+// btw/update/goal/compact/language/session/cd/cat + deferred stubs).
 
-import type { ClientMsg } from "../protocol.ts";
+import type { ClientMsg, Machine } from "../protocol.ts";
 import { tline, LineKind } from "./transcript.ts";
-import { hintStyle } from "./styles.ts";
+import { commands } from "./commands.ts";
 import {
   sendCmd,
   postJSON,
@@ -12,7 +13,6 @@ import {
   fetchModels,
   fetchMachines,
   fetchSessionsForProject,
-  fetchUsage,
   dialServer,
   type ActionDoneMsg,
 } from "./client.ts";
@@ -50,39 +50,44 @@ export function runCommand(m: Model, raw: string): Cmd[] {
     case "/server":
       return cmdServer(m, fields);
     case "/project":
-      return cmdProject(m);
+      return cmdProject(m, fields);
+    case "/new":
+      return cmdNew(m, fields);
+    case "/session":
+      return cmdSession(m, fields);
+    case "/cd":
+      return cmdCd(m, fields);
+    case "/cat":
+      return cmdCat(m, fields);
     case "/model":
       return cmdModel(m);
     case "/goal":
       return cmdGoal(m, fields);
-    case "/new":
-      return cmdNew(m, fields);
-    case "/resume":
-      return cmdResume(m);
-    case "/stop":
-      return cmdStop(m);
-    case "/compact":
-      return cmdCompact(m);
     case "/btw":
       return cmdBtw(m, fields);
-    case "/queue":
-      return cmdQueue(m, fields);
-    case "/rename":
-      return cmdRename(m, fields);
-    case "/usage":
-      return cmdUsage(m);
-    case "/language":
-      return cmdLanguage(m, fields);
+    case "/compact":
+      return cmdCompact(m);
     case "/update":
       return cmdUpdate(m);
+    case "/language":
+      return cmdLanguage(m, fields);
     default:
-      // unlisted commands (init, skill, mcp, git, update…) are consumed quietly
-      m.notice = "";
-      return [];
+      return unknownCommand(m, fields[0] ?? "");
   }
 }
 
-/** sendMessage appends the user line and ships it, mapping "." to continue. */
+function unknownCommand(m: Model, name: string): Cmd[] {
+  const known = commands.map((c) => c.name);
+  const suggestions = known
+    .filter((c) => c.slice(1, 3) === name.slice(1, 3) || c.startsWith(name.slice(0, 3)))
+    .slice(0, 3);
+  m.notice = suggestions.length > 0
+    ? `알 수 없는 명령: ${name} — 가까운 명령: ${suggestions.join(" ")}`
+    : `알 수 없는 명령: ${name}`;
+  return [];
+}
+
+/** sendMessage appends the user line and ships it (mid-turn messages join the running turn). */
 export function sendMessage(m: Model, text: string): Cmd[] {
   if (text === "") return [];
   if (text === ".") text = "continue";
@@ -96,7 +101,6 @@ export function sendMessage(m: Model, text: string): Cmd[] {
   return orEmpty(sendCmd(m.client, { type: "send", text }));
 }
 
-/** requireConn guards commands that need a live connection. */
 function requireConn(m: Model): boolean {
   if (m.client) return true;
   m.notice = "서버에 연결되어 있지 않습니다";
@@ -112,11 +116,15 @@ function orEmpty(cmd: Cmd): Cmd[] {
 }
 
 function cmdServer(m: Model, fields: string[]): Cmd[] {
+  if (fields.length >= 2 && fields[1] === "open") {
+    const addr = m.addr !== "" ? m.addr : "localhost:5494";
+    m.transcript.push(tline(LineKind.Notice, `웹 UI: \x1b]8;;http://${addr}\x1b\\${addr}\x1b]8;;\x1b\\`));
+    return [];
+  }
   if (fields.length >= 3) {
     return execAction(m, MenuAction.ConnectExec, "", fields.slice(1).join(" "));
   }
   if (fields.length === 2) {
-    // /server token-only hint
     m.notice = m.t().ServerUsage;
     return [];
   }
@@ -125,13 +133,138 @@ function cmdServer(m: Model, fields: string[]): Cmd[] {
   return orEmpty(fetchMachines(m.addr, m.token));
 }
 
-function cmdProject(m: Model): Cmd[] {
+function cmdProject(m: Model, fields: string[]): Cmd[] {
+  if (fields.length >= 2 && fields[1] === "new") {
+    return cmdProjectNew(m, fields.slice(2).join(" "));
+  }
   if (!m.hasServer()) {
     m.notice = "먼저 /server 로 연결하세요";
     return [];
   }
   m.menu = menuProjects(m.projects, m.project);
   return orEmpty(fetchProjects(m.addr, m.token));
+}
+
+function cmdProjectNew(m: Model, name: string): Cmd[] {
+  if (!m.hasServer()) {
+    m.notice = "먼저 /server 로 연결하세요";
+    return [];
+  }
+  if (name === "") {
+    m.startInlinePrompt("프로젝트 이름은?", false, (value) => {
+      m.wantProject = value;
+      createProject(m, value);
+    });
+    return [];
+  }
+  m.wantProject = name;
+  return createProject(m, name);
+}
+
+function createProject(m: Model, name: string): Cmd[] {
+  return [postJSON("POST", restURL(m.addr, "/api/projects"), m.token, {
+    name,
+    machine: m.machineDefault(),
+    workdir: m.workdirDefault(),
+  }).then(done, toErr)];
+}
+
+function cmdNew(m: Model, fields: string[]): Cmd[] {
+  if (!requireConn(m)) return [];
+  m.transcript = [];
+  m.streamKind = -1;
+  m.scroll = -1;
+  m.catView = null;
+  return orEmpty(sendCmd(m.client, { type: "new", text: arg(fields) }));
+}
+
+function cmdCd(m: Model, fields: string[]): Cmd[] {
+  const p = arg(fields);
+  if (p === "") {
+    m.notice = "사용법: /cd <경로>";
+    return [];
+  }
+  if (!requireConn(m) || m.currentSession === "") return [];
+  return orEmpty(sendCmd(m.client, { type: "session_cd", text: p } satisfies ClientMsg));
+}
+
+function cmdCat(m: Model, fields: string[]): Cmd[] {
+  const p = arg(fields);
+  if (p === "") {
+    m.notice = "사용법: /cat <파일>";
+    return [];
+  }
+  if (!requireConn(m)) return [];
+  return orEmpty(sendCmd(m.client, { type: "cat", text: p } satisfies ClientMsg));
+}
+
+function cmdSession(m: Model, fields: string[]): Cmd[] {
+  const sub = fields[1] ?? "";
+  switch (sub) {
+    case "": {
+      if (!requireConn(m)) return [];
+      m.menu = menuSessions(m.sessionIDs);
+      return orEmpty(sendCmd(m.client, { type: "sessions" }));
+    }
+    case "new":
+      return cmdNew(m, ["new", ...fields.slice(2)]);
+    case "cd":
+      return cmdCd(m, ["cd", ...fields.slice(2)]);
+    case "resume": {
+      if (!requireConn(m)) return [];
+      m.menu = menuSessions(m.sessionIDs);
+      return orEmpty(sendCmd(m.client, { type: "sessions" }));
+    }
+    case "rename": {
+      const name = fields.slice(2).join(" ");
+      if (name === "" || m.currentSession === "") {
+        m.notice = "사용법: /session rename <이름> (세션 열린 상태에서)";
+        return [];
+      }
+      const cmd: Cmd = postJSON("PATCH", restURL(m.addr, `/api/sessions/${encodeURIComponent(m.currentSession)}`), m.token, { name }).then(done, toErr);
+      return [cmd];
+    }
+    case "host": {
+      const target = fields[2] ?? "";
+      if (target === "") {
+        m.notice = "사용법: /session host <ip또는머신이름>";
+        return [];
+      }
+      if (!requireConn(m) || m.currentSession === "") return [];
+      return cmdSessionHost(m, target);
+    }
+    default:
+      return unknownCommand(m, "/session " + sub);
+  }
+}
+
+function cmdSessionHost(m: Model, target: string): Cmd[] {
+  const known = m.machines.find((mach) => mach.name === target);
+  const finish = () => {
+    if (m.client) {
+      m.send({ t: "actionDone" });
+      orEmpty(sendCmd(m.client, { type: "session_host", text: known ? known.name : target }));
+    }
+  };
+  if (known) {
+    finish();
+    return [];
+  }
+  m.startInlinePrompt(`사용자명 (${target})`, false, (user) => {
+    if (user === "") return;
+    m.startInlinePrompt(`비밀번호 (${user}@${target})`, true, async (password) => {
+      if (password === "") return;
+      try {
+        const machine: Machine = { name: target, host: target, port: 22, user, state: "" };
+        await postJSON("POST", restURL(m.addr, "/api/machines"), m.token, machine);
+        await postJSON("PUT", restURL(m.addr, `/api/machines/${encodeURIComponent(target)}/auth`), m.token, { user, password });
+        finish();
+      } catch (err) {
+        m.notice = "머신 등록 실패: " + String(err);
+      }
+    });
+  });
+  return [];
 }
 
 function cmdModel(m: Model): Cmd[] {
@@ -151,31 +284,6 @@ function cmdGoal(m: Model, fields: string[]): Cmd[] {
   return [];
 }
 
-function cmdNew(m: Model, fields: string[]): Cmd[] {
-  if (!requireConn(m)) return [];
-  // a fresh session starts on a blank screen
-  m.transcript = [];
-  m.streamKind = -1;
-  m.scroll = -1;
-  return orEmpty(sendCmd(m.client, { type: "new", text: arg(fields) }));
-}
-
-function cmdResume(m: Model): Cmd[] {
-  if (!requireConn(m)) return [];
-  m.menu = menuSessions(m.sessionIDs);
-  return orEmpty(sendCmd(m.client, { type: "sessions" }));
-}
-
-function cmdStop(m: Model): Cmd[] {
-  if (!m.client) return [];
-  return orEmpty(sendCmd(m.client, { type: "stop" }));
-}
-
-function cmdCompact(m: Model): Cmd[] {
-  if (!requireConn(m)) return [];
-  return orEmpty(sendCmd(m.client, { type: "compact" }));
-}
-
 function cmdBtw(m: Model, fields: string[]): Cmd[] {
   if (fields.length < 2) {
     m.notice = "사용법: /btw <질문>";
@@ -185,32 +293,9 @@ function cmdBtw(m: Model, fields: string[]): Cmd[] {
   return orEmpty(sendCmd(m.client, { type: "btw", text: arg(fields) }));
 }
 
-function cmdQueue(m: Model, fields: string[]): Cmd[] {
-  if (fields.length < 2) {
-    m.notice = "사용법: /queue <프롬프트>";
-    return [];
-  }
+function cmdCompact(m: Model): Cmd[] {
   if (!requireConn(m)) return [];
-  // the server queues MsgSend while a turn is running
-  return orEmpty(sendCmd(m.client, { type: "send", text: arg(fields) } satisfies ClientMsg));
-}
-
-function cmdRename(m: Model, fields: string[]): Cmd[] {
-  if (fields.length < 2 || m.currentSession === "") {
-    m.notice = "사용법: /rename <이름> (세션 열린 상태에서)";
-    return [];
-  }
-  const name = arg(fields);
-  const cmd: Cmd = postJSON("PATCH", restURL(m.addr, `/api/sessions/${encodeURIComponent(m.currentSession)}`), m.token, { name }).then(done, toErr);
-  return [cmd];
-}
-
-function cmdUsage(m: Model): Cmd[] {
-  if (m.currentSession === "") {
-    m.notice = "열린 세션이 없습니다";
-    return [];
-  }
-  return orEmpty(fetchUsage(m.addr, m.token, m.currentSession));
+  return orEmpty(sendCmd(m.client, { type: "compact" }));
 }
 
 function cmdUpdate(m: Model): Cmd[] {
@@ -235,7 +320,7 @@ function cmdUpdate(m: Model): Cmd[] {
 function cmdLanguage(m: Model, fields: string[]): Cmd[] {
   const t = m.t();
   if (fields.length < 2 || !validLang(fields[1]!)) {
-    m.notice = hintStyle.render(t.LanguageUsage);
+    m.notice = t.LanguageUsage;
     return [];
   }
   m.lang = fields[1] as Model["lang"];
@@ -261,7 +346,6 @@ export function execAction(m: Model, act: MenuAction, payload: string, input: st
       const cmds: Cmd[] = [];
       if (m.client) {
         cmds.push(...orEmpty(sendCmd(m.client, { type: "project", text: payload })));
-        // resume the newest session of this project, or start fresh
         cmds.push(fetchSessionsForProject(m.addr, m.token, payload));
       }
       return cmds;
