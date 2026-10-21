@@ -1,88 +1,78 @@
 # Kiwi-Agent
 
-A self-hosted coding agent for your local network.
+A self-hosted coding agent for your home network, driven from the browser.
 
-Kiwi splits the coding agent into two parts: a **server** that runs on one
-always-on PC and a **terminal client** that connects to it from anywhere on
-your LAN. The agent loop, sessions, and project state live on the server, so
-you can sit down at any machine, attach, and pick up where you left off.
-The actual work — file edits, shell commands — executes on the machines
-where your code lives, relayed by the server over SSH.
+Kiwi splits the coding agent in two: **kiwi-server** runs on one always-on PC —
+agent loop, sessions, projects, model routing — and serves a **web app** on the
+LAN. Open `http://<server>:6002` from any browser (PC, tablet, phone) and pick
+up where you left off. The actual work — file edits, shell commands — executes
+on the machines where your code lives, relayed by the server over SSH.
 
 ```
- your desk PC            server PC                  work machines
+ your browser            server PC                  work machines
 ┌────────────┐        ┌──────────────────┐        ┌─────────────────┐
-│ kiwi (TUI) │◀──────▶│ kiwi-server      │◀─SSH──▶│ repositories     │
-│  /project  │  WS    │ · agent loop     │        │ files & shells   │
-│  /new      │        │ · projects       │        │ runs kiwi exec   │
-│  sessions  │        │ · model routing  │        └─────────────────┘
-└────────────┘        │ · document index │
-                      │ · web UI         │
-                      └──────────────────┘
+│ web app    │◀──WS──▶│ kiwi-server      │◀─SSH──▶│ repositories     │
+│ (any device│        │ · agent loop     │        │ files & shells   │
+│  on LAN)   │        │ · sessions       │        │ runs kiwi exec   │
+└────────────┘        │ · model routing  │        └─────────────────┘
+                      └──────┬───────────┘
+                             ▼
+                      searxng (sidecar, agent web search)
 ```
 
 ## Why this shape
 
-- **Sessions live on the server.** Start a task at one desk, resume it from
-  another. If a work machine goes down, you see it from wherever you are.
+- **Sessions live on the server.** Start a task at one desk, continue it from
+  the tablet on the couch. Nothing to install on client devices — a browser
+  is enough.
 - **Work runs where the code is.** The server executes tools on registered
   work machines over SSH via a small structured-exec subcommand
   (`kiwi exec`), not by pasting shell snippets together.
-- **Bring your own models.** LLM providers — llama.cpp, Ollama, OpenAI,
-  Gemini, anything OpenAI-compatible — are wired per role (chat, OCR,
-  embeddings, document cleaning) and can be swapped in the web UI.
-- **Your datasheets, searchable.** Uploaded PDFs and documents are parsed,
-  cleaned, and indexed (full-text + vectors) so the agent can look things
-  up while it works.
+- **Bring your own models.** llama.cpp, Ollama, OpenAI-compatible — wire
+  providers per role (chat, OCR, embeddings) and swap them in the web UI.
+- **Web search without API keys.** A bundled SearXNG sidecar gives the agent
+  private, key-free web search on your network.
 
-## Install
+## Run
 
-### Agent (`kiwi`)
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/ByungHyun21/Kiwi-Agent/main/install.sh | sh
-```
-
-### Server (`kiwi-server`)
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/ByungHyun21/Kiwi-Agent/main/install.sh | sh -s -- kiwi-server
-```
-
-The script downloads the latest release binary for your platform into
-`~/.local/bin` and falls back to building from source with
-[Bun](https://bun.sh) when no prebuilt binary exists. Manual alternative:
+Docker (recommended):
 
 ```sh
 git clone https://github.com/ByungHyun21/Kiwi-Agent && cd Kiwi-Agent
-bun install
-bun run build   # → ./kiwi, ./kiwi-server single-file binaries
+docker compose up -d --build
+# open http://<server-ip>:6002
 ```
 
-Work machines need `sshd` and the `kiwi` binary on `PATH`
-(`~/.local/bin/kiwi` by default) — no daemon, nothing else.
+- Web app and API on `0.0.0.0:6002`; SearXNG on `8888` (host-local).
+- Sessions, projects and settings persist in `~/.local/share/kiwi` (SQLite).
+- The server is unauthenticated by default (`KIWI_AUTH=off`) — intended for
+  a trusted home LAN. Set `KIWI_AUTH=on` in `docker-compose.yml` to require
+  the access token (printed once in the server logs).
 
-## Quickstart
+Source (dev):
 
 ```sh
-# PC A — start the server (default port 5494 = "KIWI" on a phone keypad)
-kiwi-server
-
-# PC B — connect the agent
-kiwi
-# → enter the server address, e.g. 192.168.0.10:5494
-
-# any PC — open the web UI
-# http://<server-ip>:5494
+bun install
+cd web && bun install && bun run build && cd ..
+bun run src/kiwi-server.ts        # serves the web app + API
+cd web && bun run dev             # or the Vite dev server (proxy included)
+bun test
 ```
 
-Inside the agent: `/project` to pick a project, `/new` to start a session,
-`/resume` to continue one, `/exit` to exit.
+## Terminal UI
+
+A terminal client is included for keyboard-first work: the `kiwi` binary
+launches an OpenTUI-based full-screen UI (the web app remains the primary
+client), and the legacy text UI lives in `src/tui/`. Prebuilt terminal
+binaries are available via [install.sh](install.sh) — web app not included,
+use Docker for that.
+
+## Font
+
+한국어를 주 언어로 사용한다면 [D2 Coding](https://github.com/naver/d2-coding-font)
+(SIL OFL 1.1) 폰트를 권장합니다. 한글 글자 폭이 라틴 문자의 정확히 2배라
+웹 UI의 표·게이지·레이아웃이 어긋나지 않습니다.
 
 ## License
 
-[MIT](LICENSE) · Korean terminal font: [D2 Coding](https://github.com/naver/d2-coding-font) — SIL OFL 1.1
-
-## TUI
-
-The terminal UI is built on [OpenTUI](https://github.com/anomalyco/opentui) (MIT).
+[MIT](LICENSE)
