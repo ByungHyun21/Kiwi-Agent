@@ -5,7 +5,7 @@ import { randomBytes } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import * as path from "node:path";
 import { Database, type SQLQueryBindings } from "bun:sqlite";
-import type { Machine, Project, SessionInfo } from "./protocol.ts";
+import type { Machine, Project, SessionInfo } from "./shared/protocol.ts";
 
 /** Role describes where a role routes. */
 export interface Role {
@@ -137,8 +137,6 @@ export class Store {
       ALTER TABLE sessions ADD COLUMN workdir TEXT NOT NULL DEFAULT '';
       UPDATE sessions SET machine = COALESCE((SELECT p.machine FROM projects p WHERE p.id = sessions.project_id), '') WHERE machine = '';
       UPDATE sessions SET workdir = COALESCE((SELECT p.workdir FROM projects p WHERE p.id = sessions.project_id), '') WHERE workdir = '';
-      ALTER TABLE machines ADD COLUMN auth_user TEXT NOT NULL DEFAULT '';
-      ALTER TABLE machines ADD COLUMN auth_secret TEXT NOT NULL DEFAULT '';
       CREATE VIRTUAL TABLE messages_fts USING fts5(text, content='', contentless_delete=1);
       INSERT INTO messages_fts(rowid, text) SELECT rowid, content FROM messages;`,
       `ALTER TABLE sessions ADD COLUMN kind TEXT NOT NULL DEFAULT '';
@@ -475,20 +473,6 @@ export class Store {
     return { machine: r?.machine ?? "", workdir: r?.workdir ?? "" };
   }
 
-  /** SaveMachineAuth stores per-machine credentials, obfuscated with the server token. */
-  saveMachineAuth(name: string, user: string, password: string): void {
-    const secret = xorBytes(Buffer.from(password, "utf8"), Buffer.from(this.token(), "utf8")).toString("base64");
-    this.db.run(`UPDATE machines SET auth_user=?, auth_secret=? WHERE name=?`, [user, secret, name]);
-  }
-
-  /** MachineAuth returns stored credentials, or null when absent. */
-  machineAuth(name: string): { user: string; password: string } | null {
-    const r = this.db.query(`SELECT auth_user, auth_secret FROM machines WHERE name=?`).get(name) as { auth_user: string; auth_secret: string } | null;
-    if (!r || r.auth_user === "" || r.auth_secret === "") return null;
-    const password = xorBytes(Buffer.from(r.auth_secret, "base64"), Buffer.from(this.token(), "utf8")).toString("utf8");
-    return { user: r.auth_user, password };
-  }
-
   /** RenameSession sets the session name. */
   renameSession(id: string, name: string): void {
     this.db.run(`UPDATE sessions SET name=? WHERE id=?`, [name, id]);
@@ -532,12 +516,6 @@ export class Store {
     this.db.run(`DELETE FROM queue WHERE seq=?`, [row.seq]);
     return row.prompt;
   }
-}
-
-function xorBytes(data: Buffer, key: Buffer): Buffer {
-  const out = Buffer.allocUnsafe(data.length);
-  for (let i = 0; i < data.length; i++) out[i] = data[i]! ^ key[i % key.length]!;
-  return out;
 }
 
 function sessionID(): string {

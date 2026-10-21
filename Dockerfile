@@ -1,4 +1,4 @@
-# kiwi-server + web SPA (OpenTUI TUI included in the binary)
+# kiwi-server + web SPA
 FROM oven/bun:1 AS build
 WORKDIR /app
 COPY web/package.json web/bun.lock* ./web/

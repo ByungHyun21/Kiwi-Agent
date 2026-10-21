@@ -4,11 +4,13 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { Agent, lcsDiff, safePath, tokenize, unifiedDiff } from "../src/agent.ts";
+import { lcsDiff, unifiedDiff } from "../src/server/agent/diff.ts";
+import { Agent } from "../src/server/agent/loop.ts";
+import { safePath, tokenize } from "../src/server/agent/paths.ts";
 import { Store } from "../src/store.ts";
 import type { Client, Response, Tool, ToolCall } from "../src/llm.ts";
 import type { Runner } from "../src/ssh.ts";
-import type { ExecResult, Machine } from "../src/protocol.ts";
+import type { ExecResult, Machine } from "../src/shared/protocol.ts";
 
 describe("tokenize", () => {
   test("splits on whitespace and honors quotes", () => {

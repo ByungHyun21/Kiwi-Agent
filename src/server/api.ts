@@ -1,7 +1,8 @@
 // REST API guarded by the bearer token.
 
-import type { Machine, Project } from "../protocol.ts";
+import type { Machine, Project } from "../shared/protocol.ts";
 import { Store } from "../store.ts";
+import { isAuthorized } from "./auth.ts";
 import type { KiwiServer } from "./server.ts";
 
 const jsonHeaders = { "Content-Type": "application/json; charset=utf-8" };
@@ -14,12 +15,6 @@ function fail(msg: string, status: number): Response {
   return new Response(msg + "\n", { status });
 }
 
-function bearerToken(req: Request, url: URL): string {
-  const auth = req.headers.get("Authorization") ?? "";
-  if (auth.startsWith("Bearer ")) return auth.slice("Bearer ".length);
-  return url.searchParams.get("token") ?? "";
-}
-
 /** apiRoutes dispatches /api/* requests. */
 export async function apiRoutes(s: KiwiServer, req: Request, url: URL): Promise<Response> {
   // health is public (parity with the Go server)
@@ -28,7 +23,7 @@ export async function apiRoutes(s: KiwiServer, req: Request, url: URL): Promise<
   }
 
   // auth guard (KIWI_AUTH=off opens the API to the LAN)
-  if (process.env.KIWI_AUTH !== "off" && bearerToken(req, url) !== s.token) {
+  if (!isAuthorized(s, req, url)) {
     return fail("unauthorized", 401);
   }
 
@@ -53,31 +48,19 @@ export async function apiRoutes(s: KiwiServer, req: Request, url: URL): Promise<
     s.store.saveMachine(m);
     return json(m);
   }
-  if (seg[0] === "api" && seg[1] === "machines" && seg.length === 4 && seg[3] === "auth" && method === "PUT") {
-    let body: { user?: string; password?: string };
-    try {
-      body = (await req.json()) as { user?: string; password?: string };
-    } catch {
-      return fail("bad body", 400);
-    }
-    if (!body.user || !body.password) return fail("user, password required", 400);
+  // remote self-update: the machine's kiwi downloads the latest release and
+  // replaces its own binary (kiwi exec update)
+  if (seg[0] === "api" && seg[1] === "machines" && seg.length === 4 && seg[3] === "update" && method === "POST") {
     const name = decodeURIComponent(seg[2]!);
+    let machine: Machine;
     try {
-      s.store.machine(name);
+      machine = s.store.machine(name);
     } catch {
       return fail("machine not found", 404);
     }
-    s.store.saveMachineAuth(name, body.user, body.password);
-    let connected = false;
-    let probe = "";
-    try {
-      const res = await s.runner.run(s.store.machine(name), ".", ["info"], null, undefined);
-      connected = res.ok;
-      if (!res.ok) probe = res.code ?? res.message ?? "";
-    } catch (err) {
-      probe = String(err);
-    }
-    return json({ ok: true, connected, probe });
+    // the download runs on the machine; leave room for it before the SSH abort
+    const res = await s.runner.run(machine, ".", ["update"], null, AbortSignal.timeout(180_000));
+    return json(res);
   }
   if (seg[0] === "api" && seg[1] === "machines" && seg.length === 3 && method === "DELETE") {
     s.store.deleteMachine(decodeURIComponent(seg[2]!));

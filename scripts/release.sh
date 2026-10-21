@@ -7,7 +7,7 @@
 #   scripts/release.sh <version>          # e.g. scripts/release.sh 0.1.1
 #
 # Steps:
-#   1. verifies src/updater.ts VERSION and package.json match <version>
+#   1. verifies src/exec/updater.ts VERSION and package.json match <version>
 #   2. builds kiwi + kiwi-server for linux/darwin × amd64/arm64
 #   3. creates dist-release/kiwi[_server]_<os>_<arch>.tar.gz
 #   4. tags v<version> (pushes it) and creates the GitHub release
@@ -17,8 +17,8 @@ VER="${1:-}"
 [ -n "$VER" ] || { echo "usage: scripts/release.sh <version>"; exit 1; }
 case "$VER" in v*) echo "pass the version without the leading v"; exit 1;; esac
 
-grep -q "VERSION = \"$VER\"" src/updater.ts || {
-  echo "error: src/updater.ts VERSION does not match $VER"; exit 1; }
+grep -q "VERSION = \"$VER\"" src/exec/updater.ts || {
+  echo "error: src/exec/updater.ts VERSION does not match $VER"; exit 1; }
 grep -q "\"version\": \"$VER\"" package.json || {
   echo "error: package.json version does not match $VER"; exit 1; }
 

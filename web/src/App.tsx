@@ -14,11 +14,12 @@ import {
   MsgProject,
   MsgSend,
   MsgStop,
-  wsURL,
   type Event,
   type PanelState,
   type Project,
-} from "./kiwi";
+} from "../../src/shared/protocol";
+import { wsURL } from "./api";
+import Admin from "./Admin";
 
 const COLORS: Record<string, string> = {
   user: "#7fd7ff",
@@ -48,6 +49,7 @@ export default function App(): React.ReactElement {
   const [panel, setPanel] = useState<PanelState | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
   const [draft, setDraft] = useState("");
+  const [showAdmin, setShowAdmin] = useState(false);
 
   const [everOk, setEverOk] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
@@ -155,7 +157,7 @@ export default function App(): React.ReactElement {
   );
 
   useEffect(() => {
-    const ws = new WebSocket(wsURL(location.host, token));
+    const ws = new WebSocket(wsURL(token));
     wsRef.current = ws;
     ws.onmessage = (e) => {
       try {
@@ -294,6 +296,12 @@ export default function App(): React.ReactElement {
           >
             + 새 세션
           </button>
+          <button
+            className="rounded border border-neutral-700 px-2 py-1 text-xs hover:bg-neutral-800"
+            onClick={() => setShowAdmin(true)}
+          >
+            관리
+          </button>
         </div>
       </header>
 
@@ -349,6 +357,8 @@ export default function App(): React.ReactElement {
           </button>
         </div>
       </div>
+
+      {showAdmin && <Admin token={token} onClose={() => setShowAdmin(false)} />}
     </div>
   );
 }

@@ -120,13 +120,6 @@ describe("Store", () => {
     expect(store.sessionLocation(s.id)).toEqual({ machine: "m2", workdir: "/third" });
   });
 
-  test("machine auth roundtrip, obfuscated at rest (T05)", () => {
-    store.saveMachine({ name: "m1", host: "h", port: 22, user: "u", state: "" });
-    expect(store.machineAuth("m1")).toBeNull();
-    store.saveMachineAuth("m1", "yoon", "s3cret~패스");
-    expect(store.machineAuth("m1")).toEqual({ user: "yoon", password: "s3cret~패스" });
-  });
-
   test("message full-text search across sessions (A10)", () => {
     store.saveMachine({ name: "m1", host: "h", port: 22, user: "u", state: "" });
     const p = store.createProject({ id: 0, name: "p1", machine: "m1", workdir: "/w" });

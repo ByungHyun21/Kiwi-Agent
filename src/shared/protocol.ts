@@ -1,5 +1,7 @@
-// Shared contracts between kiwi-server, the kiwi TUI and the kiwi exec
-// subcommand: the exec JSON result and the WebSocket event stream.
+// Shared contracts between kiwi-server, the web client and the kiwi exec
+// subcommand: the exec JSON result, stored entities, and the WebSocket
+// event stream. This file is the single source of truth for the wire
+// protocol — the web SPA imports it directly.
 
 /** ExecResult is the single JSON document every `kiwi exec` command prints on stdout. */
 export interface ExecResult {

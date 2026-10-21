@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { encodeFrame, FrameReader, fromLspPos, langForFile, toLspPos } from "../src/lspbroker.ts";
+import { encodeFrame, FrameReader, fromLspPos, langForFile, toLspPos } from "../src/exec/lspbroker.ts";
 
 describe("lsp positions", () => {
   test("1-based to 0-based and back", () => {

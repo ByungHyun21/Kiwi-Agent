@@ -5,7 +5,7 @@
 import { mkdirSync } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { ExecResult, Machine } from "./protocol.ts";
+import type { ExecResult, Machine } from "./shared/protocol.ts";
 
 const defaultExecPath = "~/.local/bin/kiwi";
 

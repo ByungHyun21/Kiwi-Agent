@@ -54,11 +54,64 @@ Source (dev):
 ```sh
 bun install
 cd web && bun install && bun run build && cd ..
-bun run src/kiwi-server.ts        # serves the web app + API
-cd web && bun run dev             # or the Vite dev server (proxy included)
+bun run src/kiwi-server.ts        # serves web/dist + API (default :5494)
 bun test
+
+cd web && bun run dev             # or the Vite dev server, proxying /api and /ws
 ```
 
+`KIWI_ADDR` sets the listen address (default `:5494`). Without a `web/dist`
+build the UI answers with a build hint — run the build above or use Vite.
+
+## Code layout
+
+- `src/shared/protocol.ts` — wire protocol and entity types; the SPA imports it directly
+- `src/server/` — HTTP/WS surface (`server.ts`, `ws.ts`, `session.ts`), agent loop and tools (`agent/`), SQLite store, SSH runner
+- `src/exec/` — the `kiwi` binary: `kiwi exec` subcommands, LSP broker, self-updater
+- `web/` — Vite + React SPA (the only client)
+
+## Work machines (`kiwi exec`)
+
+Tools run on your work machines over SSH, so each one needs the `kiwi`
+binary. Install it with the one-liner (linux/darwin, amd64/arm64 — downloads
+the release, or builds from source with [Bun](https://bun.sh) as a fallback):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/ByungHyun21/Kiwi-Agent/main/install.sh | sh
+```
+
+This installs to `~/.local/bin/kiwi` — the path the server invokes over SSH,
+so it works even when non-interactive SSH shells have a minimal `PATH`.
+Installed elsewhere? Set the exec path when registering the machine.
+
+Then:
+
+1. Enable key-based SSH from the server to the machine (the server connects
+   with `BatchMode=yes` and cannot answer password prompts).
+2. Register the machine in the web app's admin panel (관리 → 기기) or with
+   `POST /api/machines`; create a project with `POST /api/projects`.
+
+### Updating
+
+On the machine itself:
+
+```sh
+kiwi update
+```
+
+Or let the server push it — it runs `kiwi exec update` there over SSH, which
+downloads the latest release and replaces the binary in place:
+
+```sh
+curl -X POST http://<server-ip>:6002/api/machines/<name>/update
+# {"ok":true,"data":"{\"status\":\"updated\",\"version\":\"0.1.1\"}"}
+```
+
+`status` is `updated` or `current` (already newest); failures come back as
+`{"ok":false,"code":…,"message":…}`. Add
+`-H "Authorization: Bearer $TOKEN"` when `KIWI_AUTH=on`. A machine whose kiwi
+predates this subcommand answers `unknown command: update` — run
+`kiwi update` on it once over SSH.
 
 ## License
 

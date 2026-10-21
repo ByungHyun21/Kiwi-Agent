@@ -4,7 +4,8 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { run, Version } from "../src/execcli.ts";
+import { run } from "../src/exec/entry.ts";
+import { Version } from "../src/exec/sys.ts";
 
 const dir = mkdtempSync(path.join(os.tmpdir(), "kiwi-exec-"));
 process.chdir(dir);
@@ -34,6 +35,7 @@ describe("kiwi exec", () => {
     expect(code).toBe(1);
     expect(res.ok).toBe(false);
     expect(res.code).toBe("badrequest");
+    expect(res.message as string).toContain("update");
   });
 
   test("read missing file → noent", async () => {
@@ -207,5 +209,41 @@ describe("kiwi exec", () => {
     expect(stop.res.ok).toBe(true);
     const list2 = JSON.parse((await exec(["mon", "list"])).res.data as string) as { id: string; running: boolean }[];
     expect(list2.find((x) => x.id === sid)?.running).toBe(false);
+  });
+
+  test("update reports current when the machine is up to date", async () => {
+    const osName = process.platform === "darwin" ? "darwin" : "linux";
+    const archName = process.arch === "x64" ? "amd64" : process.arch;
+    const rel = Bun.serve({
+      port: 0,
+      fetch: () =>
+        Response.json({
+          tag_name: `v${Version}`,
+          assets: [{ name: `kiwi_${osName}_${archName}.tar.gz`, browser_download_url: "https://example.invalid/kiwi.tgz" }],
+        }),
+    });
+    process.env.KIWI_RELEASES_API = `http://localhost:${rel.port}/latest`;
+    try {
+      const { code, res } = await exec(["update"]);
+      expect(code).toBe(0);
+      expect(res.ok).toBe(true);
+      expect(JSON.parse(res.data as string)).toEqual({ status: "current", version: Version });
+    } finally {
+      rel.stop(true);
+      delete process.env.KIWI_RELEASES_API;
+    }
+  });
+
+  test("update fails cleanly when the release API is unreachable", async () => {
+    process.env.KIWI_RELEASES_API = "http://localhost:1/latest";
+    try {
+      const { code, res } = await exec(["update"]);
+      expect(code).toBe(1);
+      expect(res.ok).toBe(false);
+      expect(res.code).toBe("error");
+      expect(res.message as string).toContain("release lookup failed");
+    } finally {
+      delete process.env.KIWI_RELEASES_API;
+    }
   });
 });

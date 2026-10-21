@@ -1,8 +1,8 @@
 // kiwi entrypoint: `kiwi exec ...` — runs tool operations on work machines.
 // The agent UI is the web app served by kiwi-server.
 
-import { run as execRun } from "./execcli.ts";
-import { maybeAutoUpdate } from "./updater.ts";
+import { run as execRun } from "./exec/entry.ts";
+import { maybeAutoUpdate } from "./exec/updater.ts";
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);

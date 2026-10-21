@@ -1,7 +1,7 @@
 // Updater tests: version comparison and release lookup (against a local mock).
 
 import { afterAll, describe, expect, test } from "bun:test";
-import { isNewer, latestRelease, runningFromSource, selfUpdate, VERSION, type Release } from "../src/updater.ts";
+import { isNewer, latestRelease, runningFromSource, selfUpdate, VERSION, type Release } from "../src/exec/updater.ts";
 
 describe("isNewer", () => {
   test("patch bumps", () => {

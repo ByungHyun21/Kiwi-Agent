@@ -1,22 +1,15 @@
-// Hosts the kiwi HTTP surface: the web UI, REST API and the agent
+// Hosts the kiwi HTTP surface: the web SPA, REST API and the agent
 // WebSocket endpoint.
 
-import { Agent } from "../agent.ts";
+import { Agent } from "./agent/loop.ts";
 import { Client as LLMClient } from "../llm.ts";
-import type { Machine, PanelState } from "../protocol.ts";
+import type { Machine, PanelState } from "../shared/protocol.ts";
 import type { Runner } from "../ssh.ts";
 import { Store } from "../store.ts";
-import {
-  chatPage,
-  dashboardPage,
-  machinesPage,
-  docsPage,
-  settingsPage,
-} from "../web/html.ts";
-import { serveStatic } from "../web/static.ts";
 import { apiRoutes } from "./api.ts";
+import { isAuthorized } from "./auth.ts";
+import type { ServerConfig } from "./config.ts";
 import { serveWebDist } from "./webdist.ts";
-import { projectDetail, projectsPage, sessionDetail } from "./pages.ts";
 import { Conn } from "./ws.ts";
 
 /** Server assembles all kiwi-server handlers. */
@@ -25,11 +18,13 @@ export class KiwiServer {
   token: string;
   webDist: string;
   runner: Runner;
+  authRequired: boolean;
 
-  constructor(store: Store, runner: Runner) {
+  constructor(store: Store, runner: Runner, config: ServerConfig) {
     this.store = store;
     this.token = store.token();
-    this.webDist = process.env.KIWI_WEB_DIST ?? "";
+    this.webDist = config.webDist;
+    this.authRequired = config.authRequired;
     this.runner = runner;
   }
 
@@ -43,11 +38,7 @@ export class KiwiServer {
 
     // websocket endpoint
     if (path === "/ws") {
-      let token = url.searchParams.get("token") ?? "";
-      if (!token) {
-        token = (req.headers.get("Authorization") ?? "").replace(/^Bearer /, "");
-      }
-      if (process.env.KIWI_AUTH !== "off" && token !== this.token) {
+      if (!isAuthorized(this, req, url)) {
         return new Response("unauthorized", { status: 401 });
       }
       const upgraded = server.upgrade(req, { data: new Conn(this) });
@@ -55,61 +46,23 @@ export class KiwiServer {
       return new Response("upgrade failed", { status: 500 });
     }
 
-    // built web SPA (KIWI_WEB_DIST) — serves assets and falls back to
-    // index.html for app routes; legacy htmx pages keep their exact paths
-    if (this.webDist !== "" && !path.startsWith("/api") && !path.startsWith("/static") && path !== "/docs" && path !== "/settings" && path !== "/machines" && !path.startsWith("/projects") && path !== "/chat") {
-      const res = await serveWebDist(this.webDist, path);
-      if (res) return res;
-    }
-
-    // static assets
-    if (path.startsWith("/static/")) {
-      const res = serveStatic(path.slice("/static/".length));
-      if (res) return res;
-      return new Response("not found", { status: 404 });
-    }
-
     // REST API
     if (path.startsWith("/api/")) {
       return apiRoutes(this, req, url);
     }
 
-    // pages
-    if (req.method === "GET") {
-      switch (path) {
-        case "/":
-          return html(dashboardPage());
-        case "/machines":
-          return html(machinesPage(this.store.machines()));
-        case "/projects":
-          return projectsPage(this);
-        case "/settings": {
-          let provider = "", baseURL = "", model = "";
-          try {
-            const role = this.store.role("agent-chat");
-            provider = role.provider;
-            model = role.model;
-            for (const p of this.store.providers()) {
-              if (p.name === provider) baseURL = p.baseUrl;
-            }
-          } catch {
-            // not configured yet
-          }
-          return html(settingsPage(this.token, provider, baseURL, model));
-        }
-        case "/chat":
-          return html(chatPage(this.token));
-        case "/docs":
-          return html(docsPage());
-      }
-      if (path.startsWith("/projects/")) {
-        return projectDetail(this, path.slice("/projects/".length));
-      }
-      if (path.startsWith("/sessions/")) {
-        return sessionDetail(this, decodeURIComponent(path.slice("/sessions/".length)));
-      }
+    // built web SPA: assets, with index.html fallback for app routes
+    if (this.webDist !== "") {
+      const res = await serveWebDist(this.webDist, path);
+      if (res) return res;
     }
 
+    if (req.method === "GET") {
+      return new Response("web app not built — run `bun run build` in web/ or set KIWI_WEB_DIST", {
+        status: 503,
+        headers: { "Content-Type": "text/plain; charset=utf-8" },
+      });
+    }
     return new Response("not found", { status: 404 });
   }
 
@@ -205,8 +158,4 @@ export class KiwiServer {
     }
     return state;
   }
-}
-
-function html(body: string): Response {
-  return new Response(body, { headers: { "Content-Type": "text/html; charset=utf-8" } });
 }
