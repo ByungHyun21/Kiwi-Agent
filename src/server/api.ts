@@ -27,8 +27,8 @@ export async function apiRoutes(s: KiwiServer, req: Request, url: URL): Promise<
     return json({ status: "ok" });
   }
 
-  // auth guard
-  if (bearerToken(req, url) !== s.token) {
+  // auth guard (KIWI_AUTH=off opens the API to the LAN)
+  if (process.env.KIWI_AUTH !== "off" && bearerToken(req, url) !== s.token) {
     return fail("unauthorized", 401);
   }
 

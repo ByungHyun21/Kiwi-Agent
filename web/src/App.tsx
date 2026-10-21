@@ -49,6 +49,7 @@ export default function App(): React.ReactElement {
   const [projects, setProjects] = useState<Project[]>([]);
   const [draft, setDraft] = useState("");
 
+  const [everOk, setEverOk] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const inAssistant = useRef(false);
   const inReasoning = useRef(false);
@@ -154,7 +155,6 @@ export default function App(): React.ReactElement {
   );
 
   useEffect(() => {
-    if (token === "") return;
     const ws = new WebSocket(wsURL(location.host, token));
     wsRef.current = ws;
     ws.onmessage = (e) => {
@@ -165,6 +165,7 @@ export default function App(): React.ReactElement {
       }
     };
     ws.onopen = () => {
+      setEverOk(true);
       setConn("ok");
       ws.send(JSON.stringify({ type: "sessions" }));
     };
@@ -230,12 +231,12 @@ export default function App(): React.ReactElement {
     [send],
   );
 
-  if (token === "") {
+  if (conn === "closed" && !everOk) {
     return (
       <div className="flex h-full items-center justify-center p-6">
         <div className="w-full max-w-sm space-y-3">
           <div className="text-lg font-bold">Kiwi</div>
-          <div className="text-sm text-neutral-500">kiwi-server 토큰을 입력하세요</div>
+          <div className="text-sm text-neutral-500">서버가 인증을 요구합니다. 토큰을 입력하세요</div>
           <input
             className="w-full rounded border border-neutral-700 bg-neutral-900 px-3 py-2 outline-none focus:border-neutral-500"
             value={tokenDraft}

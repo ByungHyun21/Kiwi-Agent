@@ -47,7 +47,7 @@ export class KiwiServer {
       if (!token) {
         token = (req.headers.get("Authorization") ?? "").replace(/^Bearer /, "");
       }
-      if (token !== this.token) {
+      if (process.env.KIWI_AUTH !== "off" && token !== this.token) {
         return new Response("unauthorized", { status: 401 });
       }
       const upgraded = server.upgrade(req, { data: new Conn(this) });
