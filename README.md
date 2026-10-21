@@ -59,14 +59,6 @@ cd web && bun run dev             # or the Vite dev server (proxy included)
 bun test
 ```
 
-## Terminal UI
-
-A terminal client is included for keyboard-first work: the `kiwi` binary
-launches an OpenTUI-based full-screen UI (the web app remains the primary
-client), and the legacy text UI lives in `src/tui/`. Prebuilt terminal
-binaries are available via [install.sh](install.sh) — web app not included,
-use Docker for that.
-
 
 ## License
 

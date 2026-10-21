@@ -1,4 +1,5 @@
-// kiwi entrypoint: `kiwi exec ...` subcommand or the TUI.
+// kiwi entrypoint: `kiwi exec ...` — runs tool operations on work machines.
+// The agent UI is the web app served by kiwi-server.
 
 import { run as execRun } from "./execcli.ts";
 import { maybeAutoUpdate } from "./updater.ts";
@@ -10,9 +11,12 @@ async function main(): Promise<void> {
     const code = await execRun(args.slice(1), Bun.stdin.stream() as unknown as ReadableStream<Uint8Array>, process.stdout);
     process.exit(code);
   }
-  await maybeAutoUpdate(args);
-  const { run } = await import("./tui2/app.tsx");
-  await run();
+  if (args[0] === "update") {
+    await maybeAutoUpdate(args);
+    return;
+  }
+  console.log("usage: kiwi exec <...> | kiwi update");
+  process.exit(args.length === 0 ? 0 : 1);
 }
 
 void main();

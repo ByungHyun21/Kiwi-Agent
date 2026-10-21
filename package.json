@@ -8,23 +8,12 @@
     "typecheck": "tsc --noEmit",
     "kiwi": "bun run src/kiwi.ts",
     "kiwi-server": "bun run src/kiwi-server.ts",
-    "build": "bun run scripts/build-kiwi.ts && bun build --compile --outfile kiwi-server src/kiwi-server.ts",
+    "build": "bun build --compile --outfile kiwi src/kiwi.ts && bun build --compile --outfile kiwi-server src/kiwi-server.ts",
     "test": "bun test"
   },
   "devDependencies": {
-    "@opentui/core-darwin-arm64": "^0.6.6",
-    "@opentui/core-darwin-x64": "^0.6.6",
-    "@opentui/core-linux-arm64": "^0.6.6",
-    "@opentui/core-linux-arm64-musl": "^0.6.6",
-    "@opentui/core-linux-x64-musl": "^0.6.6",
-    "@opentui/core-win32-arm64": "^0.6.6",
-    "@opentui/core-win32-x64": "^0.6.6",
     "@types/bun": "^1.4.2",
     "typescript": "^7.0.2"
   },
-  "dependencies": {
-    "@opentui/core": "0.6.6",
-    "@opentui/solid": "0.6.6",
-    "solid-js": "1.9.12"
-  }
+  "dependencies": {}
 }
