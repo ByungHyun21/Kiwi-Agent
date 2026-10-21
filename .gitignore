@@ -10,6 +10,7 @@ node_modules/
 # Build output (bun build --compile)
 /kiwi
 /kiwi-server
+/kiwi-tui2
 bin/
 dist/
 dist-release/
@@ -40,6 +41,7 @@ models/
 AGENTS.md
 docs/
 plans/
+reference/
 
 # OS
 .DS_Store

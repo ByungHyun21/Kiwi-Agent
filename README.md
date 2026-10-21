@@ -81,4 +81,14 @@ Inside the agent: `/project` to pick a project, `/new` to start a session,
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE) · Korean terminal font: [D2 Coding](https://github.com/naver/d2-coding-font) — SIL OFL 1.1
+
+## TUI
+
+The new terminal UI (experimental) is built on [OpenTUI](https://github.com/anomalyco/opentui) (MIT):
+
+```sh
+bun run kiwi-tui2
+```
+
+Session UI patterns reference [opencode](https://github.com/anomalyco/opencode) (MIT).
