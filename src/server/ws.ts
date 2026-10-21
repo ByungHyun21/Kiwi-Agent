@@ -267,6 +267,17 @@ export class Conn {
     let lastState: PanelState | undefined;
     agent.emit = (e: Event) => {
       if (e.state) lastState = e.state;
+      if (e.type === EvState && e.state) {
+        // agent state carries only ctx/tokens; merge in panel identity
+        const merged: PanelState = {
+          ...this.srv.panelState(this.sess, this.proj),
+          ctxUsed: e.state.ctxUsed,
+          ctxMax: e.state.ctxMax,
+          tokens: e.state.tokens,
+        };
+        this.send({ ...e, state: merged });
+        return;
+      }
       this.send(e);
     };
 
