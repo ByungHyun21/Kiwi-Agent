@@ -70,4 +70,8 @@ use Docker for that.
 
 ## License
 
-[MIT](LICENSE) · UI font: [D2 Coding](https://github.com/naver/d2-coding-font) — bundled, applied automatically (SIL OFL 1.1)
+This project is MIT.
+
+- [D2 Coding](https://github.com/naver/d2-coding-font) — SIL OFL 1.1, bundled as the UI font
+- [SQLite](https://www.sqlite.org/) — public domain, embedded storage engine
+- [SearXNG](https://github.com/searxng/searxng) — AGPL 3.0, bundled sidecar for agent web search
