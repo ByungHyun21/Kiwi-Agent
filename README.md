@@ -70,4 +70,4 @@ use Docker for that.
 
 ## License
 
-[MIT](LICENSE) · Recommended font for Korean: [D2 Coding](https://github.com/naver/d2-coding-font) (SIL OFL 1.1)
+[MIT](LICENSE) · UI font: [D2 Coding](https://github.com/naver/d2-coding-font) — bundled, applied automatically (SIL OFL 1.1)

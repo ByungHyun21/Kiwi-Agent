@@ -1,5 +1,21 @@
 @import "tailwindcss";
 
+/* D2 Coding (SIL OFL 1.1) — bundled; Hangul is exactly 2x Latin width */
+@font-face {
+  font-family: "D2Coding";
+  src: url("/fonts/D2Coding-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "D2Coding";
+  src: url("/fonts/D2Coding-Bold.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
 html,
 body,
 #root {
@@ -9,4 +25,5 @@ body,
 body {
   background: #0d1117;
   color: #e6e6e6;
+  font-family: "D2Coding", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
