@@ -1,4 +1,4 @@
-// Compile the tui2 client into a single executable. The OpenTUI solid
+// Compile the kiwi client (OpenTUI TUI) into a single executable. The OpenTUI solid
 // transform must run at BUILD time (bunfig preload only applies to `bun run`),
 // otherwise whitespace text children crash the native scene at startup.
 //
@@ -8,7 +8,7 @@
 import { createSolidTransformPlugin } from "@opentui/solid/bun-plugin";
 
 let target: string | undefined;
-let outfile = "kiwi-tui2";
+let outfile = "kiwi";
 const args = process.argv.slice(2);
 for (let i = 0; i < args.length; i++) {
   if (args[i] === "--target") target = args[++i];
@@ -17,7 +17,7 @@ for (let i = 0; i < args.length; i++) {
 }
 
 const result = await Bun.build({
-  entrypoints: ["src/kiwi-tui2.ts"],
+  entrypoints: ["src/kiwi.ts"],
   target: "bun",
   ...(target ? { target: target as "bun" } : {}),
   plugins: [createSolidTransformPlugin()],

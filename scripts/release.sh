@@ -53,7 +53,7 @@ for os in linux darwin; do
   for arch in amd64 arm64; do
     bt_arch="$arch"; [ "$arch" = "amd64" ] && bt_arch=x64
     echo "building kiwi for $os/$arch..."
-    bun run scripts/build-tui2.ts --target "bun-${os}-${bt_arch}" --outfile "$OUT/pkg/kiwi" >/dev/null
+    bun run scripts/build-kiwi.ts --target "bun-${os}-${bt_arch}" --outfile "$OUT/pkg/kiwi" >/dev/null
     tar -czf "$OUT/kiwi_${os}_${arch}.tar.gz" -C "$OUT/pkg" "kiwi"
     rm -rf "$OUT/pkg"
     build_one "$os" "$arch" kiwi-server src/kiwi-server.ts

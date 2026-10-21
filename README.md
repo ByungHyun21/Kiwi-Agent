@@ -85,10 +85,5 @@ Inside the agent: `/project` to pick a project, `/new` to start a session,
 
 ## TUI
 
-The new terminal UI (experimental) is built on [OpenTUI](https://github.com/anomalyco/opentui) (MIT):
-
-```sh
-bun run kiwi-tui2
-```
-
+The terminal UI is built on [OpenTUI](https://github.com/anomalyco/opentui) (MIT).
 Session UI patterns reference [opencode](https://github.com/anomalyco/opencode) (MIT).
