@@ -35,9 +35,27 @@ build_one() {
   rm -rf "$OUT/pkg"
 }
 
+# The TUI embeds OpenTUI's native renderer, whose platform packages npm
+# filters out by os/cpu — fetch every variant so cross builds can resolve them.
+OTUI_VER=$(bun -e 'console.log(require("./node_modules/@opentui/core/package.json").version)')
+for p in linux-x64 linux-arm64 linux-arm64-musl linux-x64-musl darwin-x64 darwin-arm64 win32-x64 win32-arm64; do
+  if [ ! -f "node_modules/@opentui/core-$p/package.json" ]; then
+    mkdir -p "node_modules/@opentui/core-$p"
+    curl -fsSL "https://registry.npmjs.org/@opentui/core-$p/-/core-$p-${OTUI_VER}.tgz" | tar -xz -C "node_modules/@opentui/core-$p"
+    if [ -d "node_modules/@opentui/core-$p/package" ]; then
+      mv "node_modules/@opentui/core-$p/package"/* "node_modules/@opentui/core-$p/"
+      rmdir "node_modules/@opentui/core-$p/package"
+    fi
+  fi
+done
+
 for os in linux darwin; do
   for arch in amd64 arm64; do
-    build_one "$os" "$arch" kiwi src/kiwi.ts
+    bt_arch="$arch"; [ "$arch" = "amd64" ] && bt_arch=x64
+    echo "building kiwi for $os/$arch..."
+    bun run scripts/build-tui2.ts --target "bun-${os}-${bt_arch}" --outfile "$OUT/pkg/kiwi" >/dev/null
+    tar -czf "$OUT/kiwi_${os}_${arch}.tar.gz" -C "$OUT/pkg" "kiwi"
+    rm -rf "$OUT/pkg"
     build_one "$os" "$arch" kiwi-server src/kiwi-server.ts
   done
 done

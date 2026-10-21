@@ -11,7 +11,7 @@ async function main(): Promise<void> {
     process.exit(code);
   }
   await maybeAutoUpdate(args);
-  const { run } = await import("./tui/model.ts");
+  const { run } = await import("./tui2/app.tsx");
   await run();
 }
 
