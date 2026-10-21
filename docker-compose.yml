@@ -18,10 +18,8 @@ services:
   searxng:
     image: searxng/searxng:latest
     container_name: kiwi-searxng
-    ports:
-      - "8888:8080"
+    # UI/포트 노출 없음 — kiwi-server가 compose 네트워크 안에서
+    # http://searxng:8080/search?format=json 으로만 사용
     volumes:
       - ./searxng:/etc/searxng:ro
-    environment:
-      - SEARXNG_BASE_URL=http://localhost:8888/
     restart: unless-stopped
