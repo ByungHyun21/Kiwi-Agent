@@ -15,6 +15,7 @@ import {
 } from "../web/html.ts";
 import { serveStatic } from "../web/static.ts";
 import { apiRoutes } from "./api.ts";
+import { serveWebDist } from "./webdist.ts";
 import { projectDetail, projectsPage, sessionDetail } from "./pages.ts";
 import { Conn } from "./ws.ts";
 
@@ -22,11 +23,13 @@ import { Conn } from "./ws.ts";
 export class KiwiServer {
   store: Store;
   token: string;
+  webDist: string;
   runner: Runner;
 
   constructor(store: Store, runner: Runner) {
     this.store = store;
     this.token = store.token();
+    this.webDist = process.env.KIWI_WEB_DIST ?? "";
     this.runner = runner;
   }
 
@@ -50,6 +53,13 @@ export class KiwiServer {
       const upgraded = server.upgrade(req, { data: new Conn(this) });
       if (upgraded) return undefined as unknown as Response;
       return new Response("upgrade failed", { status: 500 });
+    }
+
+    // built web SPA (KIWI_WEB_DIST) — serves assets and falls back to
+    // index.html for app routes; legacy htmx pages keep their exact paths
+    if (this.webDist !== "" && !path.startsWith("/api") && !path.startsWith("/static") && path !== "/docs" && path !== "/settings" && path !== "/machines" && !path.startsWith("/projects") && path !== "/chat") {
+      const res = await serveWebDist(this.webDist, path);
+      if (res) return res;
     }
 
     // static assets

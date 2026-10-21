@@ -1,0 +1,26 @@
+services:
+  kiwi-server:
+    build: .
+    container_name: kiwi-server
+    ports:
+      - "6002:6002"
+    environment:
+      - KIWI_DATA=/data
+      - KIWI_WEB_DIST=/app/web/dist
+      - SEARXNG_URL=http://searxng:8080
+    volumes:
+      - ${HOME}/.local/share/kiwi:/data
+    restart: unless-stopped
+    depends_on:
+      - searxng
+
+  searxng:
+    image: searxng/searxng:latest
+    container_name: kiwi-searxng
+    ports:
+      - "8888:8080"
+    volumes:
+      - ./searxng:/etc/searxng:ro
+    environment:
+      - SEARXNG_BASE_URL=http://localhost:8888/
+    restart: unless-stopped

@@ -6,7 +6,7 @@ import { KiwiServer } from "./server/server.ts";
 import { Conn } from "./server/ws.ts";
 
 function main(): void {
-  let addr = ":5494";
+  let addr = process.env.KIWI_ADDR ?? ":5494";
   const args = process.argv.slice(2);
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "-addr" || args[i] === "--addr") {

@@ -1,0 +1,10 @@
+# kiwi-server가 JSON API를 사용하므로 json 포맷 필수
+use_default_settings: true
+server:
+  secret_key: "dc445d2108050fb07b32e8cc6a7dd298bc324565471c33aba77d50e1b91d6b9f"
+  limiter: false
+  image_proxy: true
+search:
+  formats:
+    - html
+    - json
