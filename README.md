@@ -67,12 +67,7 @@ client), and the legacy text UI lives in `src/tui/`. Prebuilt terminal
 binaries are available via [install.sh](install.sh) — web app not included,
 use Docker for that.
 
-## Font
-
-한국어를 주 언어로 사용한다면 [D2 Coding](https://github.com/naver/d2-coding-font)
-(SIL OFL 1.1) 폰트를 권장합니다. 한글 글자 폭이 라틴 문자의 정확히 2배라
-웹 UI의 표·게이지·레이아웃이 어긋나지 않습니다.
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE) · Recommended font for Korean: [D2 Coding](https://github.com/naver/d2-coding-font) (SIL OFL 1.1)
