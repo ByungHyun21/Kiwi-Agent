@@ -1,7 +1,8 @@
 # kiwi-server가 JSON API를 사용하므로 json 포맷 필수
 use_default_settings: true
 server:
-  secret_key: "dc445d2108050fb07b32e8cc6a7dd298bc324565471c33aba77d50e1b91d6b9f"
+  # secret_key는 docker-compose.yml이 컨테이너 시작 시 생성해
+  # SEARXNG_SECRET으로 주입한다. 여기에 값을 커밋하지 않는다.
   limiter: false
   image_proxy: true
 search:
