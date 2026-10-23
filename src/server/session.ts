@@ -389,6 +389,7 @@ export class SessionRuntime {
           entries.push({ kind: "user", text: m.content });
           break;
         case "assistant": {
+          if (m.reasoning) entries.push({ kind: "reasoning", text: m.reasoning });
           if (m.content !== "") entries.push({ kind: "assistant", text: m.content });
           for (const tc of m.toolCalls ?? []) {
             let args = tc.args;

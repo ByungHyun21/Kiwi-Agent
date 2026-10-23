@@ -115,6 +115,26 @@ describe("llm client", () => {
     s.stop(true);
   });
 
+  test("assistant reasoning is replayed as reasoning_content", async () => {
+    let body: { messages?: Record<string, unknown>[] } | undefined;
+    const s = Bun.serve({
+      port: 0,
+      fetch: async (req) => {
+        body = (await req.json()) as { messages?: Record<string, unknown>[] };
+        return new Response("data: [DONE]\n\n", { headers: { "Content-Type": "text/event-stream" } });
+      },
+    });
+    const c = new Client(`http://localhost:${s.port}/v1`, "", "m");
+    await c.streamChat(undefined, [
+      { role: "user", content: "q" },
+      { role: "assistant", content: "", reasoning: "plan", toolCalls: [{ id: "c1", name: "read_file", args: "{}" }] },
+      { role: "tool", content: "ok", toolCallID: "c1", name: "read_file" },
+    ], []);
+    expect(body?.messages?.[1]?.reasoning_content).toBe("plan");
+    expect(body?.messages?.[1]?.content).toBeNull();
+    s.stop(true);
+  });
+
   test("authorization header sent when key set", async () => {
     let seen = "";
     const s = Bun.serve({

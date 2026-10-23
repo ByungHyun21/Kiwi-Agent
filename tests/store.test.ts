@@ -55,12 +55,17 @@ describe("Store", () => {
     store.appendMessage(sess.id, {
       role: "assistant",
       content: "",
+      reasoning: "계획",
+      providerMeta: '{"kind":"test"}',
       toolCalls: [{ id: "c1", name: "write_file", args: "{}" }],
     });
     store.appendMessage(sess.id, { role: "tool", content: "결과", toolCallID: "c1", name: "write_file" });
 
     const msgs = store.messages(sess.id);
     expect(msgs).toHaveLength(3);
+    expect(msgs[1]!.seq).toBe(1);
+    expect(msgs[1]!.reasoning).toBe("계획");
+    expect(msgs[1]!.providerMeta).toBe('{"kind":"test"}');
     expect(msgs[1]!.toolCalls![0]!.name).toBe("write_file");
     expect(msgs[2]!.toolCallID).toBe("c1");
 

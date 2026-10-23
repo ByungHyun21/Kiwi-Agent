@@ -102,7 +102,7 @@ export const EvNotice = "notice"; // transient one-line system notice (not store
 
 /** HistoryEntry is one replayed transcript entry for a resumed session. */
 export interface HistoryEntry {
-  kind: string; // user | assistant | tool | result | notice
+  kind: string; // user | assistant | reasoning | tool | result | notice
   text: string;
 }
 

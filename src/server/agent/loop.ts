@@ -76,9 +76,18 @@ export class Agent {
         this.store.appendMessage(sessionID, { role: "user", content: q });
       }
       const history = this.store.messages(sessionID);
+      // Only replay reasoning produced after the most recent user message.
+      // This keeps the current tool loop coherent while dropping older turns.
+      let lastUserSeq = -1;
+      for (const m of history) {
+        if (m.role === "user" && m.seq !== undefined) lastUserSeq = Math.max(lastUserSeq, m.seq);
+      }
       const msgs = [{ role: "system", content: sys } as Message];
       for (const m of history) {
         const msg: Message = { role: m.role, content: m.content, toolCallID: m.toolCallID, name: m.name };
+        if (m.role === "assistant" && (m.seq ?? -1) > lastUserSeq) {
+          msg.reasoning = m.reasoning;
+        }
         if (m.toolCalls) {
           msg.toolCalls = m.toolCalls.map((tc) => ({ id: tc.id, name: tc.name, args: tc.args }));
         }
@@ -99,6 +108,8 @@ export class Agent {
       this.emitState(ctxUsed);
 
       const stored: Message = { role: "assistant", content: resp.content };
+      if (resp.reasoning !== "") stored.reasoning = resp.reasoning;
+      if (resp.providerMeta) stored.providerMeta = resp.providerMeta;
       if (resp.toolCalls.length > 0) {
         stored.toolCalls = resp.toolCalls.map((tc) => ({ id: tc.id, name: tc.name, args: tc.args }));
       }

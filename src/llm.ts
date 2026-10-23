@@ -14,6 +14,7 @@ export interface ToolCall {
 export interface Message {
   role: string; // system | user | assistant | tool
   content: string;
+  reasoning?: string; // assistant: same-turn thinking replay only
   toolCalls?: ToolCall[]; // assistant: calls to run
   toolCallID?: string; // tool: which call
   name?: string; // tool name
@@ -42,6 +43,7 @@ export interface ModelInfo {
 export interface Response {
   content: string;
   reasoning: string;
+  providerMeta?: string; // reserved for signatures/encrypted reasoning adapters
   toolCalls: ToolCall[];
   usage: Usage;
   finish: string;
@@ -55,6 +57,7 @@ export interface StreamOptions {
 interface ChatMessage {
   role: string;
   content: unknown;
+  reasoning_content?: string;
   tool_calls?: {
     id: string;
     type: string;
@@ -337,6 +340,7 @@ function convertMessages(msgs: Message[]): ChatMessage[] {
       content: m.content !== "" ? m.content : null,
     };
     if (m.role === "tool") cm.content = m.content; // tool results are plain strings
+    if (m.role === "assistant" && m.reasoning) cm.reasoning_content = m.reasoning;
     if (m.toolCallID) cm.tool_call_id = m.toolCallID;
     if (m.name) cm.name = m.name;
     if (m.toolCalls && m.toolCalls.length > 0) {

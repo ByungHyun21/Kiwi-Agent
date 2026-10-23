@@ -8,7 +8,7 @@ import { lcsDiff, unifiedDiff } from "../src/server/agent/diff.ts";
 import { Agent } from "../src/server/agent/loop.ts";
 import { safePath, tokenize } from "../src/server/agent/paths.ts";
 import { Store } from "../src/store.ts";
-import type { Client, Response, Tool, ToolCall } from "../src/llm.ts";
+import type { Client, Message, Response, StreamOptions, Tool, ToolCall } from "../src/llm.ts";
 import type { Runner } from "../src/ssh.ts";
 import type { ExecResult, Machine } from "../src/shared/protocol.ts";
 
@@ -24,11 +24,19 @@ describe("tokenize", () => {
 
 class ScriptedLLM implements Client {
   public calls = 0;
+  public seen: Message[][] = [];
   baseURL = "";
   apiKey = "";
   model = "";
   constructor(private responses: Response[]) {}
-  async streamChat(): Promise<Response> {
+  async streamChat(
+    _signal: AbortSignal | undefined,
+    msgs: Message[],
+    _tools: Tool[],
+    _onDelta?: (kind: string, name: string, text: string) => void,
+    _options?: StreamOptions,
+  ): Promise<Response> {
+    this.seen.push(msgs.map((m) => ({ ...m })));
     const r = this.responses[this.calls] ?? { content: "done", reasoning: "", toolCalls: [], usage: { promptTokens: 1, completionTokens: 1 }, finish: "stop" };
     this.calls++;
     return r;
@@ -80,8 +88,12 @@ function tc(id: string, name: string, args: Record<string, unknown>): ToolCall {
   return { id, name, args: JSON.stringify(args) };
 }
 
-function respWith(calls: ToolCall[]): Response {
-  return { content: "", reasoning: "", toolCalls: calls, usage: { promptTokens: 1, completionTokens: 1 }, finish: "tool_calls" };
+function respWith(calls: ToolCall[], reasoning = ""): Response {
+  return { content: "", reasoning, toolCalls: calls, usage: { promptTokens: 1, completionTokens: 1 }, finish: "tool_calls" };
+}
+
+function textResp(content: string, reasoning = ""): Response {
+  return { content, reasoning, toolCalls: [], usage: { promptTokens: 1, completionTokens: 1 }, finish: "stop" };
 }
 
 describe("agent tool batch", () => {
@@ -112,6 +124,32 @@ describe("agent tool batch", () => {
     const sess = store.newSession(p.id, "s");
     await agent.turn(undefined, sess.id, "작업");
     expect(runner.maxActive()).toBe(1);
+    rmSync(dir, { recursive: true, force: true });
+    store.close();
+  });
+
+  test("replays reasoning inside the current turn but not on the next user turn", async () => {
+    const llm = new ScriptedLLM([
+      respWith([tc("1", "read_file", { path: "a.txt" })], "first plan"),
+      textResp("done", "final plan"),
+      textResp("next done", "next plan"),
+    ]);
+    const runner = makeRunner();
+    const { agent, store, dir } = makeAgent(llm, runner);
+    const p = store.projects()[0]!;
+    const sess = store.newSession(p.id, "s");
+
+    await agent.turn(undefined, sess.id, "first");
+    expect(llm.seen[0]!.some((m) => m.reasoning)).toBe(false);
+    expect(llm.seen[1]!.find((m) => m.role === "assistant")?.reasoning).toBe("first plan");
+
+    const stored = store.messages(sess.id);
+    expect(stored.find((m) => m.role === "assistant" && m.toolCalls)?.reasoning).toBe("first plan");
+    expect(stored.filter((m) => m.role === "assistant").at(-1)?.reasoning).toBe("final plan");
+
+    await agent.turn(undefined, sess.id, "second");
+    expect(llm.seen[2]!.some((m) => m.reasoning)).toBe(false);
+
     rmSync(dir, { recursive: true, force: true });
     store.close();
   });

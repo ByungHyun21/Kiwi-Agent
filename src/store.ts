@@ -32,6 +32,9 @@ export interface StoredToolCall {
 export interface Message {
   role: string; // system | user | assistant | tool
   content: string;
+  seq?: number; // stored order, used to identify the current user turn
+  reasoning?: string; // assistant thinking trace, display-only by default
+  providerMeta?: string; // reserved for signatures/encrypted reasoning adapters
   toolCalls?: StoredToolCall[]; // assistant tool calls
   toolCallID?: string; // tool responses
   name?: string; // tool name for tool role
@@ -147,6 +150,8 @@ export class Store {
       CREATE INDEX IF NOT EXISTS idx_sessions_parent ON sessions(parent, kind);`,
       `ALTER TABLE sessions ADD COLUMN ctx_tokens INTEGER NOT NULL DEFAULT 0;`,
       `ALTER TABLE sessions ADD COLUMN think TEXT NOT NULL DEFAULT 'auto';`,
+      `ALTER TABLE messages ADD COLUMN reasoning TEXT NOT NULL DEFAULT '';
+      ALTER TABLE messages ADD COLUMN provider_meta TEXT NOT NULL DEFAULT '';`,
     ];
     for (let i = v; i < migrations.length; i++) {
       this.db.run(migrations[i]!);
@@ -418,8 +423,8 @@ export class Store {
     const row = this.db.query(`SELECT COALESCE(MAX(seq),-1) AS maxSeq FROM messages WHERE session_id=?`).get(sessionID) as { maxSeq: number };
     const calls = m.toolCalls && m.toolCalls.length > 0 ? JSON.stringify(m.toolCalls) : "";
     const res = this.db.run(
-      `INSERT INTO messages(session_id, seq, role, content, tool_calls, tool_call_id, tool_name)
-       VALUES(?,?,?,?,?,?,?)`, [sessionID, (row?.maxSeq ?? -1) + 1, m.role, m.content, calls, m.toolCallID ?? "", m.name ?? ""]);
+      `INSERT INTO messages(session_id, seq, role, content, tool_calls, tool_call_id, tool_name, reasoning, provider_meta)
+       VALUES(?,?,?,?,?,?,?,?,?)`, [sessionID, (row?.maxSeq ?? -1) + 1, m.role, m.content, calls, m.toolCallID ?? "", m.name ?? "", m.reasoning ?? "", m.providerMeta ?? ""]);
     this.db.run(`INSERT INTO messages_fts(rowid, text) VALUES (?,?)`, [Number(res.lastInsertRowid), m.content]);
     this.db.run(`UPDATE sessions SET updated_at=? WHERE id=?`, [Math.floor(Date.now() / 1000), sessionID]);
   }
@@ -427,10 +432,27 @@ export class Store {
   /** Messages loads the conversation history. */
   messages(sessionID: string): Message[] {
     const rows = this.db
-      .query(`SELECT role, content, tool_calls, tool_call_id, tool_name FROM messages WHERE session_id=? ORDER BY seq`)
-      .all(sessionID) as { role: string; content: string; tool_calls: string; tool_call_id: string; tool_name: string }[];
+      .query(`SELECT seq, role, content, tool_calls, tool_call_id, tool_name, reasoning, provider_meta FROM messages WHERE session_id=? ORDER BY seq`)
+      .all(sessionID) as {
+        seq: number;
+        role: string;
+        content: string;
+        tool_calls: string;
+        tool_call_id: string;
+        tool_name: string;
+        reasoning: string;
+        provider_meta: string;
+      }[];
     return rows.map((r) => {
-      const m: Message = { role: r.role, content: r.content, toolCallID: r.tool_call_id, name: r.tool_name };
+      const m: Message = {
+        seq: r.seq,
+        role: r.role,
+        content: r.content,
+        toolCallID: r.tool_call_id,
+        name: r.tool_name,
+        reasoning: r.reasoning || undefined,
+        providerMeta: r.provider_meta || undefined,
+      };
       if (r.tool_calls !== "") {
         try {
           m.toolCalls = JSON.parse(r.tool_calls) as StoredToolCall[];
@@ -450,8 +472,8 @@ export class Store {
       msgs.forEach((m, i) => {
         const calls = m.toolCalls && m.toolCalls.length > 0 ? JSON.stringify(m.toolCalls) : "";
         const res = this.db.run(
-          `INSERT INTO messages(session_id, seq, role, content, tool_calls, tool_call_id, tool_name)
-           VALUES(?,?,?,?,?,?,?)`, [sessionID, i, m.role, m.content, calls, m.toolCallID ?? "", m.name ?? ""]);
+          `INSERT INTO messages(session_id, seq, role, content, tool_calls, tool_call_id, tool_name, reasoning, provider_meta)
+           VALUES(?,?,?,?,?,?,?,?,?)`, [sessionID, i, m.role, m.content, calls, m.toolCallID ?? "", m.name ?? "", m.reasoning ?? "", m.providerMeta ?? ""]);
         this.db.run(`INSERT INTO messages_fts(rowid, text) VALUES (?,?)`, [Number(res.lastInsertRowid), m.content]);
       });
     })();

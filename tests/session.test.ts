@@ -198,6 +198,20 @@ describe("SessionRuntime", () => {
     await waitFor(() => events.some((e) => e.type === EvDone));
   });
 
+  test("resume replays stored reasoning before the assistant content", () => {
+    const { runtime, events, session } = setup();
+    store.appendMessage(session.id, { role: "user", content: "q" });
+    store.appendMessage(session.id, { role: "assistant", content: "a", reasoning: "why" });
+
+    runtime.resume(session.id);
+    const history = events.find((e) => e.type === EvHistory);
+    expect(history?.history).toEqual([
+      { kind: "user", text: "q" },
+      { kind: "reasoning", text: "why" },
+      { kind: "assistant", text: "a" },
+    ]);
+  });
+
   test("drains prompts queued while a turn is running", async () => {
     const { runtime, events, calls, session, setTurn } = setup();
     let release = (): void => {};

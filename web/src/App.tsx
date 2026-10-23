@@ -13,6 +13,7 @@ import {
   EvToolResult,
   MsgNew,
   MsgProject,
+  MsgResume,
   MsgSend,
   MsgSetThink,
   MsgStop,
@@ -22,6 +23,7 @@ import {
   type Project,
   type ProviderModelGroup,
   type RoleInfo,
+  type SessionInfo,
   type ThinkLevel,
 } from "../../src/shared/protocol";
 import { parseSlashCommand, slashHint, type ParsedSlashCommand } from "../../src/shared/slash";
@@ -53,6 +55,8 @@ export default function App({ onHome }: { onHome?: () => void } = {}): React.Rea
   const [status, setStatus] = useState("idle");
   const [panel, setPanel] = useState<PanelState | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [sessions, setSessions] = useState<SessionInfo[]>([]);
+  const [sessionID, setSessionID] = useState("");
   const [draft, setDraft] = useState("");
   const [showAdmin, setShowAdmin] = useState(false);
   const [role, setRole] = useState<RoleInfo | null>(null);
@@ -91,7 +95,7 @@ export default function App({ onHome }: { onHome?: () => void } = {}): React.Rea
     if (el) el.scrollTop = el.scrollHeight;
   }, [blocks]);
 
-  const send = useCallback((msg: { type: string; text?: string }): void => {
+  const send = useCallback((msg: { type: string; text?: string; sessionId?: string; projectId?: string }): void => {
     wsRef.current?.send(JSON.stringify(msg));
   }, []);
 
@@ -150,17 +154,25 @@ export default function App({ onHome }: { onHome?: () => void } = {}): React.Rea
           if (ev.name === "idle" || ev.name === "stopped") setBusy(false);
           break;
         case EvSessions:
+          setSessions(ev.sessions ?? []);
           break;
         case EvHistory: {
-          for (const h of ev.history ?? []) {
-            const kind = h.kind === "user" ? "user" : h.kind === "tool" || h.kind === "notice" ? "result" : "assistant";
+          if (ev.session) setSessionID(ev.session);
+          endStream();
+          setBlocks((ev.history ?? []).map((h) => {
+            const kind: Block["kind"] =
+              h.kind === "user" ? "user"
+              : h.kind === "tool" || h.kind === "notice" ? "result"
+              : h.kind === "reasoning" ? "reasoning"
+              : "assistant";
             const head = h.kind === "user" ? "> " : h.kind === "tool" ? "▸ " : "";
-            addBlock(kind as Block["kind"], head + h.text);
-          }
+            return { id: nextId++, kind, text: head + h.text };
+          }));
           break;
         }
         case EvState:
           if (ev.state) setPanel(ev.state);
+          if (ev.session) setSessionID(ev.session);
           break;
         default:
           break;
@@ -253,6 +265,7 @@ export default function App({ onHome }: { onHome?: () => void } = {}): React.Rea
     ["new", () => {
       send({ type: MsgNew, text: "" });
       setBlocks([]);
+      setSessionID("");
       return true;
     }],
     ["think", (cmd) => {
@@ -312,6 +325,7 @@ export default function App({ onHome }: { onHome?: () => void } = {}): React.Rea
       send({ type: MsgProject, text: name });
       send({ type: MsgNew, text: "" });
       setBlocks([]);
+      setSessionID("");
     },
     [send],
   );
@@ -342,8 +356,9 @@ export default function App({ onHome }: { onHome?: () => void } = {}): React.Rea
         )}
         <div className="ml-auto flex items-center gap-2">
           <select
-            className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs"
+            className="max-w-[10rem] rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs disabled:opacity-40"
             value={panel?.project ?? ""}
+            disabled={busy}
             onChange={(e) => pickProject(e.target.value)}
           >
             <option value="">프로젝트…</option>
@@ -353,11 +368,32 @@ export default function App({ onHome }: { onHome?: () => void } = {}): React.Rea
               </option>
             ))}
           </select>
+          <select
+            className="max-w-[13rem] rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs disabled:opacity-40"
+            value={sessionID}
+            disabled={busy}
+            onChange={(e) => {
+              const id = e.target.value;
+              if (id === "") return;
+              setBlocks([]);
+              send({ type: MsgResume, sessionId: id });
+            }}
+          >
+            <option value="">세션…</option>
+            {sessions.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+                {s.project ? ` · ${s.project}` : ""}
+              </option>
+            ))}
+          </select>
           <button
-            className="rounded border border-neutral-700 px-2 py-1 text-xs hover:bg-neutral-800"
+            className="rounded border border-neutral-700 px-2 py-1 text-xs hover:bg-neutral-800 disabled:opacity-40"
+            disabled={busy}
             onClick={() => {
               send({ type: MsgNew, text: "" });
               setBlocks([]);
+              setSessionID("");
             }}
           >
             + 새 세션
