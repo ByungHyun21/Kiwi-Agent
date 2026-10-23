@@ -29,6 +29,7 @@ import {
 import { parseSlashCommand, slashHint, type ParsedSlashCommand } from "../../src/shared/slash";
 import { api, errMsg, wsURL } from "./api";
 import Admin from "./Admin";
+import Markdown from "./Markdown";
 
 const COLORS: Record<string, string> = {
   user: "#7fd7ff",
@@ -416,10 +417,10 @@ export default function App({ onHome }: { onHome?: () => void } = {}): React.Rea
         {blocks.map((b) => (
           <div
             key={b.id}
-            className="whitespace-pre-wrap break-words text-sm leading-relaxed"
+            className={b.kind === "assistant" ? "break-words text-sm leading-relaxed" : "whitespace-pre-wrap break-words text-sm leading-relaxed"}
             style={{ color: COLORS[b.kind], fontWeight: b.kind === "user" || b.kind === "tool" ? 600 : 400 }}
           >
-            {b.text}
+            {b.kind === "assistant" ? <Markdown text={b.text} /> : b.text}
           </div>
         ))}
       </div>
