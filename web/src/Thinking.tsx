@@ -21,11 +21,15 @@ export default function Thinking({ text, live = false }: { text: string; live?: 
         {live && <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#a8c17a]" />}
         <span className="ml-auto text-[10px] text-neutral-600">{open ? "접기" : "펼치기"}</span>
       </button>
-      {open && (
+      {open ? (
         <div className="max-h-96 overflow-y-auto whitespace-pre-wrap break-words border-t border-neutral-800 px-3 py-2 text-xs leading-relaxed text-[#8b978a]">
           {text}
         </div>
-      )}
+      ) : text !== "" ? (
+        <div className="line-clamp-2 whitespace-pre-wrap break-words border-t border-neutral-800 px-3 py-2 text-xs leading-relaxed text-[#8b978a]">
+          {text}
+        </div>
+      ) : null}
     </div>
   );
 }
