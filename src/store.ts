@@ -33,6 +33,7 @@ export interface Message {
   role: string; // system | user | assistant | tool
   content: string;
   seq?: number; // stored order, used to identify the current user turn
+  hidden?: boolean; // model-visible context that is not shown as a chat message
   reasoning?: string; // assistant thinking trace, display-only by default
   providerMeta?: string; // reserved for signatures/encrypted reasoning adapters
   toolCalls?: StoredToolCall[]; // assistant tool calls
@@ -50,6 +51,14 @@ export interface Session {
   ctxTokens: number;
   /** Per-session reasoning setting. */
   think: ThinkLevel;
+  /** Exact system prompt currently used by this session. */
+  systemText: string;
+  /** Static system-prompt version used to build systemText. */
+  systemVersion: string;
+  /** Latest AGENTS.md content observed by this session. */
+  agentsText: string;
+  /** Unix seconds when the last final assistant output completed. */
+  lastOutputAt: number;
   updatedAt: Date;
 }
 
@@ -152,6 +161,11 @@ export class Store {
       `ALTER TABLE sessions ADD COLUMN think TEXT NOT NULL DEFAULT 'auto';`,
       `ALTER TABLE messages ADD COLUMN reasoning TEXT NOT NULL DEFAULT '';
       ALTER TABLE messages ADD COLUMN provider_meta TEXT NOT NULL DEFAULT '';`,
+      `ALTER TABLE sessions ADD COLUMN system_text TEXT NOT NULL DEFAULT '';
+      ALTER TABLE sessions ADD COLUMN system_version TEXT NOT NULL DEFAULT '';
+      ALTER TABLE sessions ADD COLUMN agents_text TEXT NOT NULL DEFAULT '';
+      ALTER TABLE sessions ADD COLUMN last_output_at INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE messages ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0;`,
     ];
     for (let i = v; i < migrations.length; i++) {
       this.db.run(migrations[i]!);
@@ -376,7 +390,19 @@ export class Store {
     const now = Math.floor(Date.now() / 1000);
     this.db.run(
       `INSERT INTO sessions(id, project_id, name, created_at, updated_at) VALUES(?,?,?,?,?)`, [id, projectId, name, now, now]);
-    return { id, projectId, name, goal: "", ctxTokens: 0, think: "auto", updatedAt: new Date(now * 1000) };
+    return {
+      id,
+      projectId,
+      name,
+      goal: "",
+      ctxTokens: 0,
+      think: "auto",
+      systemText: "",
+      systemVersion: "",
+      agentsText: "",
+      lastOutputAt: 0,
+      updatedAt: new Date(now * 1000),
+    };
   }
 
   /** Sessions lists sessions, newest first, optionally filtered by project. */
@@ -402,10 +428,23 @@ export class Store {
   session(id: string): Session {
     const r = this.db
       .query(
-        `SELECT id, project_id, name, goal, ctx_tokens, think, updated_at
+        `SELECT id, project_id, name, goal, ctx_tokens, think, system_text, system_version,
+                agents_text, last_output_at, updated_at
          FROM sessions WHERE id=?`,
       )
-      .get(id) as { id: string; project_id: number; name: string; goal: string; ctx_tokens: number; think: string; updated_at: number } | null;
+      .get(id) as {
+        id: string;
+        project_id: number;
+        name: string;
+        goal: string;
+        ctx_tokens: number;
+        think: string;
+        system_text: string;
+        system_version: string;
+        agents_text: string;
+        last_output_at: number;
+        updated_at: number;
+      } | null;
     if (!r) throw new NotFoundError(`session "${id}" not found`);
     return {
       id: r.id,
@@ -414,6 +453,10 @@ export class Store {
       goal: r.goal,
       ctxTokens: r.ctx_tokens,
       think: r.think as ThinkLevel,
+      systemText: r.system_text,
+      systemVersion: r.system_version,
+      agentsText: r.agents_text,
+      lastOutputAt: r.last_output_at,
       updatedAt: new Date(r.updated_at * 1000),
     };
   }
@@ -423,16 +466,18 @@ export class Store {
     const row = this.db.query(`SELECT COALESCE(MAX(seq),-1) AS maxSeq FROM messages WHERE session_id=?`).get(sessionID) as { maxSeq: number };
     const calls = m.toolCalls && m.toolCalls.length > 0 ? JSON.stringify(m.toolCalls) : "";
     const res = this.db.run(
-      `INSERT INTO messages(session_id, seq, role, content, tool_calls, tool_call_id, tool_name, reasoning, provider_meta)
-       VALUES(?,?,?,?,?,?,?,?,?)`, [sessionID, (row?.maxSeq ?? -1) + 1, m.role, m.content, calls, m.toolCallID ?? "", m.name ?? "", m.reasoning ?? "", m.providerMeta ?? ""]);
-    this.db.run(`INSERT INTO messages_fts(rowid, text) VALUES (?,?)`, [Number(res.lastInsertRowid), m.content]);
+      `INSERT INTO messages(session_id, seq, role, content, tool_calls, tool_call_id, tool_name, reasoning, provider_meta, hidden)
+       VALUES(?,?,?,?,?,?,?,?,?,?)`, [sessionID, (row?.maxSeq ?? -1) + 1, m.role, m.content, calls, m.toolCallID ?? "", m.name ?? "", m.reasoning ?? "", m.providerMeta ?? "", m.hidden ? 1 : 0]);
+    if (!m.hidden) {
+      this.db.run(`INSERT INTO messages_fts(rowid, text) VALUES (?,?)`, [Number(res.lastInsertRowid), m.content]);
+    }
     this.db.run(`UPDATE sessions SET updated_at=? WHERE id=?`, [Math.floor(Date.now() / 1000), sessionID]);
   }
 
   /** Messages loads the conversation history. */
   messages(sessionID: string): Message[] {
     const rows = this.db
-      .query(`SELECT seq, role, content, tool_calls, tool_call_id, tool_name, reasoning, provider_meta FROM messages WHERE session_id=? ORDER BY seq`)
+      .query(`SELECT seq, role, content, tool_calls, tool_call_id, tool_name, reasoning, provider_meta, hidden FROM messages WHERE session_id=? ORDER BY seq`)
       .all(sessionID) as {
         seq: number;
         role: string;
@@ -442,12 +487,14 @@ export class Store {
         tool_name: string;
         reasoning: string;
         provider_meta: string;
+        hidden: number;
       }[];
     return rows.map((r) => {
       const m: Message = {
         seq: r.seq,
         role: r.role,
         content: r.content,
+        hidden: r.hidden !== 0,
         toolCallID: r.tool_call_id,
         name: r.tool_name,
         reasoning: r.reasoning || undefined,
@@ -472,9 +519,11 @@ export class Store {
       msgs.forEach((m, i) => {
         const calls = m.toolCalls && m.toolCalls.length > 0 ? JSON.stringify(m.toolCalls) : "";
         const res = this.db.run(
-          `INSERT INTO messages(session_id, seq, role, content, tool_calls, tool_call_id, tool_name, reasoning, provider_meta)
-           VALUES(?,?,?,?,?,?,?,?,?)`, [sessionID, i, m.role, m.content, calls, m.toolCallID ?? "", m.name ?? "", m.reasoning ?? "", m.providerMeta ?? ""]);
-        this.db.run(`INSERT INTO messages_fts(rowid, text) VALUES (?,?)`, [Number(res.lastInsertRowid), m.content]);
+          `INSERT INTO messages(session_id, seq, role, content, tool_calls, tool_call_id, tool_name, reasoning, provider_meta, hidden)
+           VALUES(?,?,?,?,?,?,?,?,?,?)`, [sessionID, i, m.role, m.content, calls, m.toolCallID ?? "", m.name ?? "", m.reasoning ?? "", m.providerMeta ?? "", m.hidden ? 1 : 0]);
+        if (!m.hidden) {
+          this.db.run(`INSERT INTO messages_fts(rowid, text) VALUES (?,?)`, [Number(res.lastInsertRowid), m.content]);
+        }
       });
     })();
   }
@@ -511,7 +560,19 @@ export class Store {
     this.db.run(
       `INSERT INTO sessions(id, project_id, name, kind, parent, created_at, updated_at) VALUES(?,?,?,?,?,?,?)`,
       [id, pid, name, "btw", parentID, now, now]);
-    return { id, projectId: pid, name, goal: "", ctxTokens: 0, think: "auto", updatedAt: new Date(now * 1000) };
+    return {
+      id,
+      projectId: pid,
+      name,
+      goal: "",
+      ctxTokens: 0,
+      think: "auto",
+      systemText: "",
+      systemVersion: "",
+      agentsText: "",
+      lastOutputAt: 0,
+      updatedAt: new Date(now * 1000),
+    };
   }
 
   /** BtwSides lists retained sides of a parent session, newest first. */
@@ -554,6 +615,24 @@ export class Store {
   /** SetSessionThink stores the session's reasoning level. */
   setSessionThink(id: string, think: ThinkLevel): void {
     this.db.run(`UPDATE sessions SET think=? WHERE id=?`, [think, id]);
+  }
+
+  /** SetSessionContext stores the exact system/AGENTS snapshot for prefix stability. */
+  setSessionContext(id: string, systemText: string, systemVersion: string, agentsText: string): void {
+    this.db.run(
+      `UPDATE sessions SET system_text=?, system_version=?, agents_text=? WHERE id=?`,
+      [systemText, systemVersion, agentsText, id],
+    );
+  }
+
+  /** SetLastOutputAt records when the last final assistant answer completed. */
+  setLastOutputAt(id: string, at: number): void {
+    this.db.run(`UPDATE sessions SET last_output_at=? WHERE id=?`, [Math.max(0, Math.floor(at)), id]);
+  }
+
+  /** DeleteHiddenMessages removes ephemeral context updates before a full snapshot refresh. */
+  deleteHiddenMessages(id: string): void {
+    this.db.run(`DELETE FROM messages WHERE session_id=? AND hidden=1`, [id]);
   }
 
   /** SetContextTokens records the current context size of the session. */

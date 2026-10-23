@@ -31,6 +31,7 @@ export interface Tool {
 export interface Usage {
   promptTokens: number;
   completionTokens: number;
+  cachedTokens?: number; // prompt tokens served from a provider prefix cache
 }
 
 /** ModelInfo is one entry from the provider's model list. */
@@ -161,6 +162,9 @@ export class Client {
         if (chunk.usage) {
           out.usage.promptTokens = chunk.usage.prompt_tokens;
           out.usage.completionTokens = chunk.usage.completion_tokens;
+          const cached = chunk.usage.prompt_tokens_details?.cached_tokens
+            ?? chunk.usage.prompt_cache_hit_tokens;
+          if (typeof cached === "number") out.usage.cachedTokens = cached;
         }
         if (!chunk.choices || chunk.choices.length === 0) continue;
         const ch = chunk.choices[0];
@@ -316,7 +320,12 @@ interface SSEChunk {
     };
     finish_reason?: string | null;
   }[];
-  usage?: { prompt_tokens: number; completion_tokens: number };
+  usage?: {
+    prompt_tokens: number;
+    completion_tokens: number;
+    prompt_tokens_details?: { cached_tokens?: number };
+    prompt_cache_hit_tokens?: number;
+  };
 }
 
 /** applyThink maps one session level to the request fields understood by

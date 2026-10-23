@@ -55,7 +55,7 @@ class ScriptedLLM implements Client {
   }
 }
 
-function makeRunner(): Runner & { log: string[]; maxActive: () => number } {
+function makeRunner(opts: { agents?: { text: string } } = {}): Runner & { log: string[]; maxActive: () => number } {
   let active = 0;
   let max = 0;
   const log: string[] = [];
@@ -66,6 +66,9 @@ function makeRunner(): Runner & { log: string[]; maxActive: () => number } {
       log.push(argv.join(" "));
       await new Promise((r) => setTimeout(r, 20));
       active--;
+      if (argv[0] === "read" && argv[1] === "AGENTS.md" && opts.agents) {
+        return { ok: true, data: opts.agents.text };
+      }
       return { ok: true, data: "[" + argv.join(" ") + "]" };
     },
   };
@@ -166,6 +169,52 @@ describe("agent tool batch", () => {
     expect(runner.log).toEqual(["read AGENTS.md", "read f.txt", "edit f.txt"]);
     const toolMsg = store.messages(sess.id).find((m) => m.role === "tool");
     expect(toolMsg!.content).toContain("수정됨");
+    rmSync(dir, { recursive: true, force: true });
+    store.close();
+  });
+});
+
+describe("agent context snapshot", () => {
+  test("keeps the system prefix stable, appends AGENTS diffs, and refreshes on compact/idle", async () => {
+    const agents = { text: "rule v1" };
+    const llm = new ScriptedLLM([
+      textResp("one"),
+      textResp("two"),
+      textResp("three"),
+    ]);
+    const runner = makeRunner({ agents });
+    const { agent, store, dir } = makeAgent(llm, runner);
+    const p = store.projects()[0]!;
+    const sess = store.newSession(p.id, "s");
+
+    await agent.turn(undefined, sess.id, "first");
+    expect(store.session(sess.id).systemText).toContain("rule v1");
+    expect(store.session(sess.id).agentsText).toBe("rule v1");
+    expect(llm.seen[0]!.find((m) => m.role === "system")?.content).toContain("rule v1");
+
+    agents.text = "rule v2\nnew line";
+    await agent.turn(undefined, sess.id, "second");
+    const active = store.session(sess.id);
+    expect(active.systemText).toContain("rule v1");
+    expect(active.systemText).not.toContain("rule v2");
+    expect(active.agentsText).toBe("rule v2\nnew line");
+    expect(store.messages(sess.id).some((m) => m.hidden)).toBe(true);
+    expect(llm.seen[1]!.find((m) => m.role === "system")?.content).toContain("rule v1");
+    expect(llm.seen[1]!.some((m) => m.role === "user" && m.content.includes("+ rule v2"))).toBe(true);
+
+    await agent.compact(undefined, sess.id);
+    expect(store.session(sess.id).systemText).toContain("rule v2");
+    expect(store.messages(sess.id).some((m) => m.hidden)).toBe(false);
+
+    store.setLastOutputAt(sess.id, 1);
+    agents.text = "rule v3";
+    await agent.turn(undefined, sess.id, "third");
+    const idle = store.session(sess.id);
+    expect(idle.systemText).toContain("rule v3");
+    expect(idle.agentsText).toBe("rule v3");
+    expect(store.messages(sess.id).some((m) => m.hidden)).toBe(false);
+    expect(llm.seen[2]!.find((m) => m.role === "system")?.content).toContain("rule v3");
+
     rmSync(dir, { recursive: true, force: true });
     store.close();
   });

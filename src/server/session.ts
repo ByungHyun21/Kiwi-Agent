@@ -359,7 +359,13 @@ export class SessionRuntime {
       return;
     }
     let target = "";
-    const msgs: Message[] = [{ role: "system", content: systemPromptText() }];
+    let systemText = systemPromptText();
+    try {
+      systemText = this.host.store.session(this.sess).systemText || systemText;
+    } catch {
+      // no active session snapshot yet
+    }
+    const msgs: Message[] = [{ role: "system", content: systemText }];
     const boundTail = (sid: string): Message[] => {
       const recent = this.host.store.messages(sid).slice(-64);
       const kept: Message[] = [];
@@ -418,6 +424,10 @@ export class SessionRuntime {
     const msgs = this.host.store.messages(this.sess);
     const entries: HistoryEntry[] = [];
     for (const m of msgs) {
+      if (m.hidden) {
+        entries.push({ kind: "notice", text: "AGENTS.md 변경분 반영" });
+        continue;
+      }
       switch (m.role) {
         case "user":
           entries.push({ kind: "user", text: m.content });
