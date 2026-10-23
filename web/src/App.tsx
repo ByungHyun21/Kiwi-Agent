@@ -30,6 +30,7 @@ import { parseSlashCommand, slashHint, type ParsedSlashCommand } from "../../src
 import { api, errMsg, wsURL } from "./api";
 import Admin from "./Admin";
 import Markdown from "./Markdown";
+import Thinking from "./Thinking";
 
 const COLORS: Record<string, string> = {
   user: "#7fd7ff",
@@ -414,15 +415,24 @@ export default function App({ onHome }: { onHome?: () => void } = {}): React.Rea
             프로젝트를 선택하고 메시지를 입력하세요.
           </div>
         )}
-        {blocks.map((b) => (
-          <div
-            key={b.id}
-            className={b.kind === "assistant" ? "break-words text-sm leading-relaxed" : "whitespace-pre-wrap break-words text-sm leading-relaxed"}
-            style={{ color: COLORS[b.kind], fontWeight: b.kind === "user" || b.kind === "tool" ? 600 : 400 }}
-          >
-            {b.kind === "assistant" ? <Markdown text={b.text} /> : b.text}
-          </div>
-        ))}
+        {blocks.map((b) => {
+          const liveThinking = b.kind === "reasoning" && busy && inReasoning.current && b.id === blocks[blocks.length - 1]?.id;
+          return (
+            <div
+              key={b.id}
+              className={b.kind === "assistant" || b.kind === "reasoning" ? "break-words text-sm leading-relaxed" : "whitespace-pre-wrap break-words text-sm leading-relaxed"}
+              style={{ color: COLORS[b.kind], fontWeight: b.kind === "user" || b.kind === "tool" ? 600 : 400 }}
+            >
+              {b.kind === "assistant" ? (
+                <Markdown text={b.text} />
+              ) : b.kind === "reasoning" ? (
+                <Thinking text={b.text} live={liveThinking} />
+              ) : (
+                b.text
+              )}
+            </div>
+          );
+        })}
       </div>
 
       <div className="border-t border-neutral-800 px-3 py-2" style={{ paddingBottom: "max(0.5rem, env(safe-area-inset-bottom))" }}>
