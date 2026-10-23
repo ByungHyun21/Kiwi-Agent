@@ -13,6 +13,7 @@ import {
   EvDelta,
   EvDone,
   EvError,
+  EvDir,
   EvHistory,
   EvNotice,
   EvPathComplete,
@@ -21,6 +22,7 @@ import {
   EvState,
   EvStatus,
   isThinkLevel,
+  type DirEntry,
   type Event,
   type HistoryEntry,
   type Machine,
@@ -198,6 +200,38 @@ export class SessionRuntime {
     const res = await this.host.runner.run(loc.machine, loc.workdir, ["read", p], null, undefined);
     if (!res.ok) this.emit({ type: EvCat, name: p, result: "", error: `오류 (${res.code}): ${res.message}` });
     else this.emit({ type: EvCat, name: p, result: res.data ?? "" });
+  }
+
+  /** listDir returns a read-only directory listing for the file explorer. */
+  async listDir(rel: string): Promise<void> {
+    if (this.sess === "") {
+      this.emit({ type: EvDir, text: rel, entries: [], error: "선택된 세션이 없습니다." });
+      return;
+    }
+    if (rel !== "" && !safePath(rel)) {
+      this.emit({ type: EvDir, text: rel, entries: [], error: "작업 폴더 안의 상대 경로만 볼 수 있습니다." });
+      return;
+    }
+    let loc;
+    try {
+      loc = this.host.execFor(this.sess, this.projID);
+    } catch (err) {
+      this.emit({ type: EvDir, text: rel, entries: [], error: err instanceof Error ? err.message : String(err) });
+      return;
+    }
+    const res = await this.host.runner.run(loc.machine, loc.workdir, rel === "" ? ["ls"] : ["ls", rel], null, undefined);
+    if (!res.ok) {
+      this.emit({ type: EvDir, text: rel, entries: [], error: `오류 (${res.code}): ${res.message}` });
+      return;
+    }
+    const entries: DirEntry[] = (res.data ?? "")
+      .split("\n")
+      .filter((line) => line !== "")
+      .map((line) => line.endsWith("/")
+        ? { name: line.slice(0, -1), dir: true }
+        : { name: line, dir: false });
+    entries.sort((a, b) => a.dir === b.dir ? a.name.localeCompare(b.name) : a.dir ? -1 : 1);
+    this.emit({ type: EvDir, text: rel, entries });
   }
 
   /** pathComplete returns ls-based path candidates for tab completion. */

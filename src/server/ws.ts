@@ -8,6 +8,7 @@ import {
   MsgBtwSides,
   MsgCat,
   MsgCompact,
+  MsgListDir,
   MsgNew,
   MsgPathComplete,
   MsgProject,
@@ -121,6 +122,9 @@ export class Conn {
         return;
       case MsgPathComplete:
         void this.runtime.pathComplete(msg.text ?? "");
+        return;
+      case MsgListDir:
+        void this.runtime.listDir(msg.text ?? "");
         return;
     }
   }

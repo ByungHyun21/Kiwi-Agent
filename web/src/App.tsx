@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   EvDelta,
+  EvDir,
   EvDone,
   EvError,
   EvHistory,
@@ -11,6 +12,7 @@ import {
   EvToolArgs,
   EvToolCall,
   EvToolResult,
+  MsgListDir,
   MsgNew,
   MsgProject,
   MsgResume,
@@ -18,6 +20,7 @@ import {
   MsgSetThink,
   MsgStop,
   THINK_LEVELS,
+  type DirEntry,
   type Event,
   type PanelState,
   type Project,
@@ -29,6 +32,7 @@ import {
 import { parseSlashCommand, slashHint, type ParsedSlashCommand } from "../../src/shared/slash";
 import { api, errMsg, wsURL } from "./api";
 import Admin from "./Admin";
+import FileExplorer from "./FileExplorer";
 import Markdown from "./Markdown";
 import Thinking from "./Thinking";
 
@@ -59,6 +63,8 @@ export default function App({ onHome }: { onHome?: () => void } = {}): React.Rea
   const [projects, setProjects] = useState<Project[]>([]);
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [sessionID, setSessionID] = useState("");
+  const [dirEntries, setDirEntries] = useState<Record<string, DirEntry[]>>({});
+  const [dirErrors, setDirErrors] = useState<Record<string, string>>({});
   const [draft, setDraft] = useState("");
   const [showAdmin, setShowAdmin] = useState(false);
   const [role, setRole] = useState<RoleInfo | null>(null);
@@ -150,6 +156,17 @@ export default function App({ onHome }: { onHome?: () => void } = {}): React.Rea
         case EvNotice:
           addBlock("notice", ev.text ?? "");
           break;
+        case EvDir: {
+          const path = ev.text ?? "";
+          setDirEntries((previous) => ({ ...previous, [path]: ev.entries ?? [] }));
+          setDirErrors((previous) => {
+            const next = { ...previous };
+            if (ev.error) next[path] = ev.error;
+            else delete next[path];
+            return next;
+          });
+          break;
+        }
         case EvStatus:
           setStatus(ev.name ?? "");
           if (ev.name === "working" || ev.name === "queued") setBusy(true);
@@ -221,6 +238,13 @@ export default function App({ onHome }: { onHome?: () => void } = {}): React.Rea
       .then(setRole)
       .catch(() => {});
   }, [conn]);
+
+  useEffect(() => {
+    if (conn !== "ok") return;
+    setDirEntries({});
+    setDirErrors({});
+    if (panel?.workdir) send({ type: MsgListDir, text: "" });
+  }, [conn, panel?.workdir, sessionID, send]);
 
   const loadModels = useCallback(async (refresh = false): Promise<void> => {
     setModelsLoading(true);
@@ -340,7 +364,15 @@ export default function App({ onHome }: { onHome?: () => void } = {}): React.Rea
     : draft.trim() !== "" ? "입력 중…" : "준비됨";
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full">
+      <FileExplorer
+        workdir={panel?.workdir ?? ""}
+        sessionKey={sessionID}
+        entries={dirEntries}
+        errors={dirErrors}
+        onLoad={(path) => send({ type: MsgListDir, text: path })}
+      />
+      <div className="flex min-w-0 flex-1 flex-col">
       <header className="flex items-center gap-2 border-b border-neutral-800 px-3 py-2">
         <span className="rounded bg-[#3c5e20] px-2 py-0.5 text-sm font-bold text-white">KIWI</span>
         {onHome ? (
@@ -595,6 +627,7 @@ export default function App({ onHome }: { onHome?: () => void } = {}): React.Rea
             전송
           </button>
         </div>
+      </div>
       </div>
 
       {showAdmin && <Admin onClose={() => setShowAdmin(false)} />}

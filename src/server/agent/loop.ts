@@ -166,6 +166,7 @@ export class Agent {
       ctxUsed,
       ctxMax: this.ctxMax,
       think: this.think,
+      workdir: this.workdir,
     };
     this.emitEvent({ type: EvState, state });
   }

@@ -70,6 +70,12 @@ export interface RoleInfo {
   model: string;
 }
 
+/** DirEntry is one read-only file-explorer item. */
+export interface DirEntry {
+  name: string;
+  dir: boolean;
+}
+
 /** PanelState carries the live sidebar values. */
 export interface PanelState {
   project: string;
@@ -80,6 +86,7 @@ export interface PanelState {
   ctxUsed: number; // current session context tokens
   ctxMax: number; // model context window
   think: ThinkLevel; // current session reasoning setting
+  workdir: string; // effective execution directory
 }
 
 // Server→client WS event types.
@@ -99,6 +106,7 @@ export const EvCat = "cat"; // /cat viewer content
 export const EvPathComplete = "path_complete"; // tab-completion candidates
 export const EvBtwSides = "btw_sides"; // retained btw sides of the current session
 export const EvNotice = "notice"; // transient one-line system notice (not stored)
+export const EvDir = "dir"; // one directory listing for the file explorer
 
 /** HistoryEntry is one replayed transcript entry for a resumed session. */
 export interface HistoryEntry {
@@ -119,6 +127,7 @@ export interface Event {
   state?: PanelState;
   history?: HistoryEntry[];
   candidates?: string[]; // path completion candidates
+  entries?: DirEntry[]; // directory listing for EvDir
 }
 
 // Client→server WS message types.
@@ -138,6 +147,7 @@ export const MsgSessionHost = "session_host";
 export const MsgCat = "cat";
 export const MsgPathComplete = "path_complete";
 export const MsgSetThink = "set_think";
+export const MsgListDir = "list_dir";
 
 /** ClientMsg is a client→server WS message. */
 export interface ClientMsg {

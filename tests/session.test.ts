@@ -10,6 +10,7 @@ import { SessionRuntime, type SessionHost } from "../src/server/session.ts";
 import {
   EvCat,
   EvDelta,
+  EvDir,
   EvDone,
   EvError,
   EvHistory,
@@ -70,6 +71,7 @@ function setup() {
   const runner = {
     async run(_m: Machine, _workdir: string, argv: string[]) {
       if (argv[0] === "read") return { ok: true, data: "file-body" };
+      if (argv[0] === "ls") return { ok: true, data: "src/\na.txt\nb.txt\n" };
       return { ok: true, data: "a.txt\nb.txt\n" };
     },
   };
@@ -93,6 +95,7 @@ function setup() {
         ctxUsed: 0,
         ctxMax: 128000,
         think,
+        workdir: "/w",
       };
     },
     execFor: () => ({ machine, workdir: "/w" }),
@@ -265,6 +268,24 @@ describe("SessionRuntime", () => {
     runtime.setMachine("m");
     expect(store.sessionLocation(session.id).machine).toBe("m");
     expect(events.some((e) => e.type === EvStatus && e.name === "session-host-moved")).toBe(true);
+  });
+
+  test("listDir returns a sorted read-only directory listing", async () => {
+    const { runtime, events, session } = setup();
+    runtime.resume(session.id);
+
+    await runtime.listDir("");
+    const first = events.find((e) => e.type === EvDir);
+    expect(first?.text).toBe("");
+    expect(first?.entries).toEqual([
+      { name: "src", dir: true },
+      { name: "a.txt", dir: false },
+      { name: "b.txt", dir: false },
+    ]);
+
+    await runtime.listDir("../outside");
+    const blocked = events.filter((e) => e.type === EvDir).at(-1);
+    expect(blocked?.error).toContain("상대 경로");
   });
 
   test("cat and path completion read through the runner", async () => {

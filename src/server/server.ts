@@ -193,6 +193,7 @@ export class KiwiServer {
       ctxUsed: 0,
       ctxMax: 128000,
       think: "auto",
+      workdir: "",
     };
     try {
       state.model = this.store.role("agent-chat").model;
@@ -221,6 +222,7 @@ export class KiwiServer {
       state.project = p.name;
       const loc = this.store.sessionLocation(sessionID);
       state.machine = loc.machine || p.machine;
+      state.workdir = loc.workdir || p.workdir;
     } catch {
       // ignore
     }
