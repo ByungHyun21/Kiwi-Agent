@@ -7,6 +7,7 @@ import type { Runner } from "../../ssh.ts";
 import type { Store } from "../../store.ts";
 import { unifiedDiff } from "./diff.ts";
 import { pathErr, safePath, tokenize } from "./paths.ts";
+import { searchWeb } from "./websearch.ts";
 
 /** ToolExecutorOptions binds tool calls to one machine folder. */
 export interface ToolExecutorOptions {
@@ -14,6 +15,8 @@ export interface ToolExecutorOptions {
   machine: Machine;
   workdir: string;
   store: Store;
+  /** SearXNG JSON API base URL; "" disables web_search. */
+  searxngUrl?: string;
 }
 
 /** ToolExecutor runs agent tool calls as structured remote exec operations. */
@@ -22,12 +25,14 @@ export class ToolExecutor {
   private machine: Machine;
   private workdir: string;
   private store: Store;
+  private searxngUrl: string;
 
   constructor(opts: ToolExecutorOptions) {
     this.runner = opts.runner;
     this.machine = opts.machine;
     this.workdir = opts.workdir;
     this.store = opts.store;
+    this.searxngUrl = opts.searxngUrl ?? "";
   }
 
   /** runTool executes one tool call and returns the raw display text. */
@@ -105,6 +110,12 @@ export class ToolExecutor {
         const res = await this.runner.run(this.machine, this.workdir, ["glob", pattern, p !== "" && safePath(p) ? p : "."], null, signal);
         if (!res.ok) return `오류 (${res.code}): ${res.message}`;
         return res.data ?? "";
+      }
+      case "web_search": {
+        const query = str("query").trim();
+        if (query === "") return "오류: query가 비어 있습니다";
+        const limit = Math.min(Math.max(int("limit") ?? 10, 10), 20);
+        return searchWeb(this.searxngUrl, query, limit, signal);
       }
       case "monitor_start": {
         const argv = tokenize(str("command"));

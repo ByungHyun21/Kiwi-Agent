@@ -9,8 +9,8 @@ export interface ServerConfig {
   addr: string;
   /** Directory holding server.db and the SSH known_hosts file. */
   dataDir: string;
-  /** False when KIWI_AUTH=off (trusted LAN). */
-  authRequired: boolean;
+  /** SearXNG JSON API base URL, "" when web search is not configured. */
+  searxngUrl: string;
   /** Built SPA directory, "" when missing. */
   webDist: string;
 }
@@ -35,7 +35,7 @@ export function loadServerConfig(argv: string[], env: Record<string, string | un
   return {
     addr,
     dataDir,
-    authRequired: env.KIWI_AUTH !== "off",
+    searxngUrl: env.SEARXNG_URL ?? "",
     webDist: configuredDist !== undefined ? configuredDist : defaultWebDist(),
   };
 }

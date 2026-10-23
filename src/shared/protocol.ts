@@ -11,6 +11,20 @@ export interface ExecResult {
   data?: string; // payload: file content, listing, sha, info JSON
 }
 
+/** ProviderInfo is a registered OpenAI-compatible endpoint (API key masked). */
+export interface ProviderInfo {
+  name: string;
+  baseUrl: string;
+  hasApiKey: boolean;
+}
+
+/** ProviderModelGroup is the model list discovered from one provider. */
+export interface ProviderModelGroup {
+  provider: string;
+  models: string[];
+  error?: string;
+}
+
 /** Machine describes a registered work machine. */
 export interface Machine {
   name: string;
@@ -40,6 +54,22 @@ export interface SessionInfo {
   updatedAt?: Date;
 }
 
+/** ThinkLevel is the per-session reasoning setting. */
+export const THINK_LEVELS = ["auto", "off", "on", "low", "medium", "high", "xhigh", "max"] as const;
+export type ThinkLevel = (typeof THINK_LEVELS)[number];
+
+/** isThinkLevel validates a reasoning level received from the wire. */
+export function isThinkLevel(value: unknown): value is ThinkLevel {
+  return typeof value === "string" && (THINK_LEVELS as readonly string[]).includes(value);
+}
+
+/** RoleInfo is the provider/model routing for one role. */
+export interface RoleInfo {
+  role: string;
+  provider: string;
+  model: string;
+}
+
 /** PanelState carries the live sidebar values. */
 export interface PanelState {
   project: string;
@@ -47,9 +77,9 @@ export interface PanelState {
   model: string;
   goal: string;
   todos?: string[];
-  ctxUsed: number;
-  ctxMax: number;
-  tokens: number; // cumulative session tokens
+  ctxUsed: number; // current session context tokens
+  ctxMax: number; // model context window
+  think: ThinkLevel; // current session reasoning setting
 }
 
 // Server→client WS event types.
@@ -68,6 +98,7 @@ export const EvHistory = "history"; // replay of a resumed session
 export const EvCat = "cat"; // /cat viewer content
 export const EvPathComplete = "path_complete"; // tab-completion candidates
 export const EvBtwSides = "btw_sides"; // retained btw sides of the current session
+export const EvNotice = "notice"; // transient one-line system notice (not stored)
 
 /** HistoryEntry is one replayed transcript entry for a resumed session. */
 export interface HistoryEntry {
@@ -106,6 +137,7 @@ export const MsgSessionCd = "session_cd";
 export const MsgSessionHost = "session_host";
 export const MsgCat = "cat";
 export const MsgPathComplete = "path_complete";
+export const MsgSetThink = "set_think";
 
 /** ClientMsg is a client→server WS message. */
 export interface ClientMsg {

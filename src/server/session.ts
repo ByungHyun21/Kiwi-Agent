@@ -6,6 +6,7 @@
 import type { Agent } from "./agent/loop.ts";
 import { safePath } from "./agent/paths.ts";
 import { systemPromptText } from "./agent/prompt.ts";
+import { runServerCommand, type ServerCommandContext } from "./commands.ts";
 import {
   EvBtwSides,
   EvCat,
@@ -13,17 +14,20 @@ import {
   EvDone,
   EvError,
   EvHistory,
+  EvNotice,
   EvPathComplete,
   EvReasoning,
   EvSessions,
   EvState,
   EvStatus,
+  isThinkLevel,
   type Event,
   type HistoryEntry,
   type Machine,
   type PanelState,
   type SessionInfo,
 } from "../shared/protocol.ts";
+import { parseSlashCommand } from "../shared/slash.ts";
 import type { Runner } from "../ssh.ts";
 import type { Message, Store } from "../store.ts";
 
@@ -113,12 +117,43 @@ export class SessionRuntime {
       this.emit({ type: EvError, error: "선택된 세션이 없습니다. /project 또는 /new 로 시작하세요." });
       return;
     }
+    const cmd = parseSlashCommand(text);
+    if (cmd?.spec) {
+      if (cmd.spec.target === "client") {
+        this.emit({ type: EvError, error: `/${cmd.name} 명령은 입력창에서 처리됩니다.` });
+        return;
+      }
+      if (runServerCommand(cmd, this.commandContext())) return;
+    }
     if (this.busy) {
       this.host.store.enqueue(this.sess, text);
       this.emit({ type: EvStatus, name: "queued" });
       return;
     }
     this.runTurn(text);
+  }
+
+  /** setThink persists a session reasoning level and shows a transient notice. */
+  setThink(level: string): void {
+    if (this.sess === "") {
+      this.emit({ type: EvError, error: "선택된 세션이 없습니다." });
+      return;
+    }
+    if (!isThinkLevel(level)) {
+      this.emit({ type: EvError, error: "추론 레벨이 올바르지 않습니다." });
+      return;
+    }
+    this.host.store.setSessionThink(this.sess, level);
+    this.pushState();
+    this.emit({ type: EvNotice, text: `추론 레벨: ${level}` });
+  }
+
+  private commandContext(): ServerCommandContext {
+    return {
+      setThink: (level) => this.setThink(level),
+      notice: (text) => this.emit({ type: EvNotice, text }),
+      error: (text) => this.emit({ type: EvError, error: text }),
+    };
   }
 
   setGoal(text: string): void {
@@ -207,12 +242,11 @@ export class SessionRuntime {
     agent.emit = (e: Event) => {
       if (e.state) lastState = e.state;
       if (e.type === EvState && e.state) {
-        // agent state carries only ctx/tokens; merge in panel identity
+        // agent state carries only ctx values; merge in panel identity
         const merged: PanelState = {
           ...this.host.panelState(this.sess, this.proj),
           ctxUsed: e.state.ctxUsed,
           ctxMax: e.state.ctxMax,
-          tokens: e.state.tokens,
         };
         this.emit({ ...e, state: merged });
         return;
@@ -328,7 +362,7 @@ export class SessionRuntime {
           answer += chunk;
           this.emit({ type: EvDelta, text: chunk });
         }
-      });
+      }, { think: agent.think });
       this.host.store.appendMessage(target, { role: "user", content: text });
       this.host.store.appendMessage(target, { role: "assistant", content: answer });
     } catch (err) {

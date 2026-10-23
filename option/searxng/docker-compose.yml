@@ -1,0 +1,19 @@
+services:
+  searxng:
+    image: searxng/searxng:latest
+    container_name: kiwi-searxng
+    # Keep it local to the host. Kiwi server normally runs on the same PC.
+    # For a SearXNG on another machine, change to "8888:8080" and use its LAN IP.
+    ports:
+      - "127.0.0.1:8888:8080"
+    volumes:
+      - ./settings.yml:/etc/searxng/settings.yml:ro
+    environment:
+      - SEARXNG_BASE_URL=http://127.0.0.1:8888/
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        export SEARXNG_SECRET="$$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+        exec /usr/local/searxng/entrypoint.sh
+    restart: unless-stopped

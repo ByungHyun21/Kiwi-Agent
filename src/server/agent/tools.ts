@@ -99,6 +99,18 @@ export const agentTools: Tool[] = [
     },
   },
   {
+    name: "web_search",
+    description: "SearXNG로 웹을 검색합니다. 최신 정보나 프로젝트 밖의 문서가 필요할 때 사용하세요. 결과는 제목·URL·요약입니다.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "검색어" },
+        limit: { type: "number", description: "결과 수, 기본 10 (10~20)" },
+      },
+      required: ["query"],
+    },
+  },
+  {
     name: "lsp_status",
     description: "LSP 데몬(작업 머신의 언어서버) 상태를 조회합니다.",
     parameters: {
@@ -235,5 +247,5 @@ export const agentTools: Tool[] = [
   },
 ];
 
-export const READ_ONLY_TOOLS = new Set(["read_file", "list_dir", "grep", "glob", "session_search", "session_read", "monitor_output", "monitor_list", "lsp_status", "lsp_diagnostics", "lsp_definition", "lsp_references", "lsp_symbols"]);
+export const READ_ONLY_TOOLS = new Set(["read_file", "list_dir", "grep", "glob", "web_search", "session_search", "session_read", "monitor_output", "monitor_list", "lsp_status", "lsp_diagnostics", "lsp_definition", "lsp_references", "lsp_symbols"]);
 

@@ -17,6 +17,7 @@ import {
   MsgSessionCd,
   MsgSessionHost,
   MsgSetGoal,
+  MsgSetThink,
   MsgState,
   MsgStop,
   type ClientMsg,
@@ -96,6 +97,9 @@ export class Conn {
         return;
       case MsgSetGoal:
         this.runtime.setGoal(msg.text ?? "");
+        return;
+      case MsgSetThink:
+        this.runtime.setThink(msg.text ?? "auto");
         return;
       case MsgCompact:
         void this.runtime.compact();

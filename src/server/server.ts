@@ -2,12 +2,11 @@
 // WebSocket endpoint.
 
 import { Agent } from "./agent/loop.ts";
-import { Client as LLMClient } from "../llm.ts";
-import type { Machine, PanelState } from "../shared/protocol.ts";
+import { cachedModelContext, Client as LLMClient } from "../llm.ts";
+import type { Machine, PanelState, ProviderModelGroup } from "../shared/protocol.ts";
 import type { Runner } from "../ssh.ts";
 import { Store } from "../store.ts";
 import { apiRoutes } from "./api.ts";
-import { isAuthorized } from "./auth.ts";
 import type { ServerConfig } from "./config.ts";
 import { serveWebDist } from "./webdist.ts";
 import { Conn } from "./ws.ts";
@@ -15,17 +14,27 @@ import { Conn } from "./ws.ts";
 /** Server assembles all kiwi-server handlers. */
 export class KiwiServer {
   store: Store;
-  token: string;
   webDist: string;
   runner: Runner;
-  authRequired: boolean;
+  private envSearxngUrl: string;
 
   constructor(store: Store, runner: Runner, config: ServerConfig) {
     this.store = store;
-    this.token = store.token();
     this.webDist = config.webDist;
-    this.authRequired = config.authRequired;
     this.runner = runner;
+    this.envSearxngUrl = config.searxngUrl;
+  }
+
+  /** searchURL resolves the runtime SearXNG base (web setting wins over env). */
+  searchURL(): string {
+    const saved = this.store.setting("searxng_url").trim();
+    return saved !== "" ? saved : this.envSearxngUrl;
+  }
+
+  /** searchSource reports where the effective SearXNG URL comes from. */
+  searchSource(): "web" | "env" | "none" {
+    if (this.store.setting("searxng_url").trim() !== "") return "web";
+    return this.envSearxngUrl !== "" ? "env" : "none";
   }
 
   /** Handle one HTTP request (routing, shared by REST/pages/WS upgrade). */
@@ -38,9 +47,6 @@ export class KiwiServer {
 
     // websocket endpoint
     if (path === "/ws") {
-      if (!isAuthorized(this, req, url)) {
-        return new Response("unauthorized", { status: 401 });
-      }
       const upgraded = server.upgrade(req, { data: new Conn(this) });
       if (upgraded) return undefined as unknown as Response;
       return new Response("upgrade failed", { status: 500 });
@@ -82,7 +88,15 @@ export class KiwiServer {
     }
     const loc = this.execFor(sessionID, project.id);
     const client = this.llmForRole("agent-chat");
-    return new Agent({ llm: client, runner: this.runner, machine: loc.machine, workdir: loc.workdir, store: this.store });
+    return new Agent({
+      llm: client,
+      runner: this.runner,
+      machine: loc.machine,
+      workdir: loc.workdir,
+      store: this.store,
+      searxngUrl: this.searchURL(),
+      think: sess.think,
+    });
   }
 
   /** execFor resolves a session's machine/workdir with project fallback (T01). */
@@ -126,16 +140,72 @@ export class KiwiServer {
     return client.listModels();
   }
 
+  /** modelsForAllProviders discovers models from every registered provider. */
+  async modelsForAllProviders(refresh = false): Promise<ProviderModelGroup[]> {
+    const out: ProviderModelGroup[] = [];
+    for (const provider of this.store.providers()) {
+      const client = new LLMClient(provider.baseUrl, provider.apiKey ?? "", "");
+      try {
+        const models = await client.listModels(AbortSignal.timeout(8_000), refresh);
+        out.push({ provider: provider.name, models });
+      } catch (err) {
+        out.push({
+          provider: provider.name,
+          models: [],
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+    return out;
+  }
+
+  /** refreshModelContext loads /models so the panel can show the model context window. */
+  async refreshModelContext(role = "agent-chat"): Promise<void> {
+    try {
+      await this.llmForRole(role).listModelInfo();
+    } catch {
+      // provider offline: keep the ctx_max fallback for now
+    }
+  }
+
+  /** modelContextForRole returns the cached model window, 0 when unknown. */
+  private modelContextForRole(role: string): number {
+    try {
+      const r = this.store.role(role);
+      for (const p of this.store.providers()) {
+        if (p.name !== r.provider) continue;
+        const n = cachedModelContext(p.baseUrl, r.model);
+        if (n > 0) return n;
+      }
+    } catch {
+      // unconfigured
+    }
+    return 0;
+  }
+
   /** panelState assembles the live sidebar state for a session. */
   panelState(sessionID: string, projectName: string): PanelState {
-    const state: PanelState = { project: projectName, machine: "", model: "", goal: "", ctxUsed: 0, ctxMax: 128000, tokens: 0 };
+    const state: PanelState = {
+      project: projectName,
+      machine: "",
+      model: "",
+      goal: "",
+      ctxUsed: 0,
+      ctxMax: 128000,
+      think: "auto",
+    };
     try {
       state.model = this.store.role("agent-chat").model;
     } catch {
       // unconfigured
     }
-    const ctxMax = parseInt(this.store.setting("ctx_max"), 10);
-    if (Number.isFinite(ctxMax) && ctxMax > 0) state.ctxMax = ctxMax;
+    const modelCtx = this.modelContextForRole("agent-chat");
+    if (modelCtx > 0) {
+      state.ctxMax = modelCtx;
+    } else {
+      const fallback = parseInt(this.store.setting("ctx_max"), 10);
+      if (Number.isFinite(fallback) && fallback > 0) state.ctxMax = fallback;
+    }
     if (sessionID === "") return state;
     let sess;
     try {
@@ -144,7 +214,8 @@ export class KiwiServer {
       return state;
     }
     state.goal = sess.goal;
-    state.tokens = sess.promptTokens + sess.completionTokens;
+    state.ctxUsed = sess.ctxTokens;
+    state.think = sess.think;
     try {
       const p = this.store.project(sess.projectId);
       state.project = p.name;
@@ -152,9 +223,6 @@ export class KiwiServer {
       state.machine = loc.machine || p.machine;
     } catch {
       // ignore
-    }
-    if (sess.promptTokens + sess.completionTokens > 0) {
-      state.ctxUsed = Math.min(sess.promptTokens + sess.completionTokens, state.ctxMax);
     }
     return state;
   }

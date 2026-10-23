@@ -8,6 +8,7 @@ let server: Bun.Server<unknown>;
 const chunks: string[] = [
   JSON.stringify({ choices: [{ delta: { content: "안녕" }, finish_reason: null }] }),
   JSON.stringify({ choices: [{ delta: { reasoning_content: "생각" }, finish_reason: null }] }),
+  JSON.stringify({ choices: [{ delta: { reasoning: "추론" }, finish_reason: null }] }),
   JSON.stringify({
     choices: [{
       delta: { tool_calls: [{ index: 0, id: "c1", function: { name: "write_file", arguments: "{\"pa" } }] },
@@ -41,7 +42,7 @@ function beforeAllServer(): void {
         return new Response(stream, { headers: { "Content-Type": "text/event-stream" } });
       }
       if (url.pathname === "/v1/models") {
-        return Response.json({ data: [{ id: "m1" }, { id: "m2" }] });
+        return Response.json({ data: [{ id: "m1", context_length: 32768 }, { id: "m2", top_provider: { context_length: 8192 } }] });
       }
       if (url.pathname === "/v1/nonstream" || url.pathname.endsWith("/complete")) {
         return Response.json({ choices: [{ message: { content: "요약" } }] });
@@ -67,7 +68,7 @@ describe("llm client", () => {
       deltas.push(`${kind}:${name}:${text}`);
     });
     expect(resp.content).toBe("안녕");
-    expect(resp.reasoning).toBe("생각");
+    expect(resp.reasoning).toBe("생각추론");
     expect(resp.finish).toBe("tool_calls");
     expect(resp.usage.promptTokens).toBe(42);
     expect(resp.usage.completionTokens).toBe(7);
@@ -79,6 +80,39 @@ describe("llm client", () => {
   test("listModels returns ids", async () => {
     const c = clientFor("");
     expect(await c.listModels()).toEqual(["m1", "m2"]);
+  });
+
+  test("listModelInfo reads context windows from common provider shapes", async () => {
+    const c = new Client(`http://localhost:${server.port}/v1`, "", "m1");
+    expect(await c.listModelInfo()).toEqual([
+      { id: "m1", contextLength: 32768 },
+      { id: "m2", contextLength: 8192 },
+    ]);
+    expect(await c.modelContextLength()).toBe(32768);
+  });
+
+  test("think levels map to vLLM/llama.cpp request fields", async () => {
+    const bodies: Record<string, unknown>[] = [];
+    const s = Bun.serve({
+      port: 0,
+      fetch: async (req) => {
+        bodies.push((await req.json()) as Record<string, unknown>);
+        return new Response("data: [DONE]\n\n", { headers: { "Content-Type": "text/event-stream" } });
+      },
+    });
+    const c = new Client(`http://localhost:${s.port}/v1`, "", "m");
+    const msgs: Message[] = [{ role: "user", content: "hi" }];
+    await c.streamChat(undefined, msgs, [], undefined, { think: "max" });
+    await c.streamChat(undefined, msgs, [], undefined, { think: "off" });
+    await c.streamChat(undefined, msgs, [], undefined, { think: "auto" });
+
+    expect(bodies[0]!.reasoning_effort).toBe("max");
+    expect(bodies[0]!.chat_template_kwargs).toEqual({ enable_thinking: true });
+    expect(bodies[1]!.reasoning_effort).toBe("none");
+    expect(bodies[1]!.chat_template_kwargs).toEqual({ enable_thinking: false });
+    expect(bodies[2]!.reasoning_effort).toBeUndefined();
+    expect(bodies[2]!.chat_template_kwargs).toBeUndefined();
+    s.stop(true);
   });
 
   test("authorization header sent when key set", async () => {

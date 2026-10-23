@@ -13,11 +13,13 @@ import {
   EvDone,
   EvError,
   EvHistory,
+  EvNotice,
   EvPathComplete,
   EvState,
   EvStatus,
   type Event,
   type Machine,
+  type ThinkLevel,
 } from "../src/shared/protocol.ts";
 import { Store } from "../src/store.ts";
 
@@ -76,15 +78,23 @@ function setup() {
     store,
     runner,
     agentFor: () => agent,
-    panelState: (_sessionID, projectName) => ({
-      project: projectName,
-      machine: "m",
-      model: "stub",
-      goal: "",
-      ctxUsed: 0,
-      ctxMax: 128000,
-      tokens: 0,
-    }),
+    panelState: (sessionID, projectName) => {
+      let think: ThinkLevel = "auto";
+      try {
+        think = store.session(sessionID).think;
+      } catch {
+        // no active session yet
+      }
+      return {
+        project: projectName,
+        machine: "m",
+        model: "stub",
+        goal: "",
+        ctxUsed: 0,
+        ctxMax: 128000,
+        think,
+      };
+    },
     execFor: () => ({ machine, workdir: "/w" }),
   };
 
@@ -146,6 +156,46 @@ describe("SessionRuntime", () => {
       { kind: "user", text: "q" },
       { kind: "assistant", text: "a" },
     ]);
+  });
+
+  test("/think changes the session level without calling the agent", () => {
+    const { runtime, events, calls, session } = setup();
+    runtime.resume(session.id);
+
+    runtime.send("/think max");
+    expect(store.session(session.id).think).toBe("max");
+    expect(calls).toHaveLength(0);
+    expect(events.some((e) => e.type === EvNotice && e.text === "추론 레벨: max")).toBe(true);
+    expect(events.some((e) => e.type === EvState && e.state?.think === "max")).toBe(true);
+    expect(store.messages(session.id)).toEqual([]);
+
+    runtime.send("/think nope");
+    expect(store.session(session.id).think).toBe("max");
+    expect(events.some((e) => e.type === EvError && (e.error ?? "").includes("사용법"))).toBe(true);
+    expect(calls).toHaveLength(0);
+  });
+
+  test("/think is handled while a turn is streaming instead of being queued", async () => {
+    const { runtime, events, calls, session, setTurn } = setup();
+    let release = (): void => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    setTurn(async (_signal, text) => {
+      if (text === "long") await gate;
+    });
+
+    runtime.resume(session.id);
+    runtime.send("long");
+    await waitFor(() => events.some((e) => e.type === EvStatus && e.name === "working"));
+
+    runtime.send("/think high");
+    expect(store.session(session.id).think).toBe("high");
+    expect(calls).toEqual(["long"]);
+    expect(events.some((e) => e.type === EvNotice && e.text === "추론 레벨: high")).toBe(true);
+
+    release();
+    await waitFor(() => events.some((e) => e.type === EvDone));
   });
 
   test("drains prompts queued while a turn is running", async () => {

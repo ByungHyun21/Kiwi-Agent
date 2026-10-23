@@ -1,15 +1,15 @@
 // HTTP/WS plumbing for the kiwi-server API. Wire contracts (event names,
 // message types, payload shapes) live in src/shared/protocol.ts.
 
-/** wsURL builds ws://<current host>/ws?token=... for this page. */
-export function wsURL(token: string): string {
+/** wsURL builds ws://<current host>/ws for this page. */
+export function wsURL(): string {
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
-  return `${proto}//${location.host}/ws?token=${encodeURIComponent(token)}`;
+  return `${proto}//${location.host}/ws`;
 }
 
-/** api calls the server with the bearer token; non-2xx bodies become errors. */
-export async function api<T>(path: string, token: string, init: RequestInit = {}): Promise<T> {
-  const headers: Record<string, string> = { Authorization: "Bearer " + token };
+/** api calls the server; non-2xx bodies become errors. */
+export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const headers: Record<string, string> = { ...(init.headers as Record<string, string> | undefined) };
   if (init.body !== undefined) headers["Content-Type"] = "application/json";
   const resp = await fetch(path, { ...init, headers });
   if (!resp.ok) {

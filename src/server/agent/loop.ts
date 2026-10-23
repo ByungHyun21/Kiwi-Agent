@@ -2,7 +2,7 @@
 // assembly, and compaction. Tool schemas live in tools.ts and execution in
 // execute.ts; the model never learns how tools are executed.
 
-import type { Client, Usage } from "../../llm.ts";
+import type { Client } from "../../llm.ts";
 import type { Runner } from "../../ssh.ts";
 import {
   EvDelta,
@@ -14,6 +14,7 @@ import {
   type Event,
   type Machine,
   type PanelState,
+  type ThinkLevel,
 } from "../../shared/protocol.ts";
 import type { Message, Store } from "../../store.ts";
 import { ToolExecutor } from "./execute.ts";
@@ -27,8 +28,10 @@ export class Agent {
   machine: Machine;
   workdir: string;
   store: Store;
+  think: ThinkLevel;
   emit?: (e: Event) => void;
   private tools: ToolExecutor;
+  private ctxMax = 0;
 
   /** MaxIterations bounds one turn's tool loop. */
   maxIterations = 0;
@@ -39,6 +42,8 @@ export class Agent {
     machine: Machine;
     workdir: string;
     store: Store;
+    searxngUrl?: string;
+    think?: ThinkLevel;
     emit?: (e: Event) => void;
   }) {
     this.llm = opts.llm;
@@ -46,14 +51,24 @@ export class Agent {
     this.machine = opts.machine;
     this.workdir = opts.workdir;
     this.store = opts.store;
+    this.think = opts.think ?? "auto";
     this.emit = opts.emit;
-    this.tools = new ToolExecutor({ runner: opts.runner, machine: opts.machine, workdir: opts.workdir, store: opts.store });
+    this.tools = new ToolExecutor({
+      runner: opts.runner,
+      machine: opts.machine,
+      workdir: opts.workdir,
+      store: opts.store,
+      searxngUrl: opts.searxngUrl,
+    });
   }
 
   /** Turn runs one user message to completion, streaming raw events via emit. */
   async turn(signal: AbortSignal | undefined, sessionID: string, userText: string): Promise<void> {
     this.store.appendMessage(sessionID, { role: "user", content: userText });
     const maxIter = this.maxIterations > 0 ? this.maxIterations : 12;
+    if (this.ctxMax <= 0) {
+      this.ctxMax = (await this.llm.modelContextLength(signal)) || this.settingInt("ctx_max", 128000);
+    }
 
     const sys = await this.systemMessage(signal);
     for (let iter = 0; iter < maxIter; iter++) {
@@ -78,9 +93,10 @@ export class Agent {
         } else {
           this.emitEvent({ type: EvDelta, text });
         }
-      });
-      this.store.addUsage(sessionID, resp.usage.promptTokens, resp.usage.completionTokens);
-      this.emitState(resp.usage);
+      }, { think: this.think });
+      const ctxUsed = resp.usage.promptTokens + resp.usage.completionTokens;
+      if (ctxUsed > 0) this.store.setContextTokens(sessionID, ctxUsed);
+      this.emitState(ctxUsed);
 
       const stored: Message = { role: "assistant", content: resp.content };
       if (resp.toolCalls.length > 0) {
@@ -130,16 +146,15 @@ export class Agent {
     this.emit?.(e);
   }
 
-  private emitState(u: Usage): void {
-    const ctxMax = this.settingInt("ctx_max", 128000);
+  private emitState(ctxUsed: number): void {
     const state: PanelState = {
       project: "",
       machine: "",
       model: "",
       goal: "",
-      ctxUsed: u.promptTokens + u.completionTokens,
-      ctxMax,
-      tokens: 0,
+      ctxUsed,
+      ctxMax: this.ctxMax,
+      think: this.think,
     };
     this.emitEvent({ type: EvState, state });
   }
@@ -167,6 +182,7 @@ export class Agent {
     this.store.replaceMessages(sessionID, [
       { role: "user", content: "[지금까지 세션 요약]\n" + summary },
     ]);
+    this.store.setContextTokens(sessionID, 0);
   }
 
   /** ShouldCompact reports whether usage crossed the auto-compact threshold. */

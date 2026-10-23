@@ -12,6 +12,7 @@ function main(): void {
   const st = Store.open(`${config.dataDir}/server.db`);
   const runner = new SSHRunner(st, { knownHostsDir: config.dataDir });
   const srv = new KiwiServer(st, runner, config);
+  void srv.refreshModelContext();
 
   const port = Number(config.addr.startsWith(":") ? config.addr.slice(1) : config.addr.split(":").pop());
   const wsHandlers = {
@@ -33,7 +34,10 @@ function main(): void {
     fetch: (req, server) => srv.handle(req, server),
     websocket: wsHandlers,
   });
-  console.log(`kiwi-server listening on http://localhost:${port} (token ${srv.token})`);
+  console.log(`kiwi-server listening on http://localhost:${port}`);
+  const searchURL = srv.searchURL();
+  const source = srv.searchSource();
+  console.log(searchURL === "" ? "web search: disabled (set a SearXNG URL in the admin panel)" : `web search: ${searchURL} (${source})`);
 }
 
 main();

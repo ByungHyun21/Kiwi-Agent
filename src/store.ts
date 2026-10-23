@@ -5,7 +5,7 @@ import { randomBytes } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import * as path from "node:path";
 import { Database, type SQLQueryBindings } from "bun:sqlite";
-import type { Machine, Project, SessionInfo } from "./shared/protocol.ts";
+import type { Machine, Project, SessionInfo, ThinkLevel } from "./shared/protocol.ts";
 
 /** Role describes where a role routes. */
 export interface Role {
@@ -43,12 +43,15 @@ export interface Session {
   projectId: number;
   name: string;
   goal: string;
-  promptTokens: number;
-  completionTokens: number;
+  /** Current context size reported by the last completion (not cumulative). */
+  ctxTokens: number;
+  /** Per-session reasoning setting. */
+  think: ThinkLevel;
   updatedAt: Date;
 }
 
 export class NotFoundError extends Error {}
+export class ConflictError extends Error {}
 
 /** Store wraps the SQLite database. */
 export class Store {
@@ -142,6 +145,8 @@ export class Store {
       `ALTER TABLE sessions ADD COLUMN kind TEXT NOT NULL DEFAULT '';
       ALTER TABLE sessions ADD COLUMN parent TEXT NOT NULL DEFAULT '';
       CREATE INDEX IF NOT EXISTS idx_sessions_parent ON sessions(parent, kind);`,
+      `ALTER TABLE sessions ADD COLUMN ctx_tokens INTEGER NOT NULL DEFAULT 0;`,
+      `ALTER TABLE sessions ADD COLUMN think TEXT NOT NULL DEFAULT 'auto';`,
     ];
     for (let i = v; i < migrations.length; i++) {
       this.db.run(migrations[i]!);
@@ -171,15 +176,6 @@ export class Store {
     this.db.run(
       `INSERT INTO settings(key,value) VALUES(?,?)
        ON CONFLICT(key) DO UPDATE SET value=excluded.value`, [key, value]);
-  }
-
-  /** Token returns the auth token, creating one on first use. */
-  token(): string {
-    const t = this.setting("token");
-    if (t !== "") return t;
-    const tok = randomBytes(24).toString("hex");
-    this.setSetting("token", tok);
-    return tok;
   }
 
   // ---- machines ----
@@ -300,6 +296,56 @@ export class Store {
        ON CONFLICT(name) DO UPDATE SET base_url=excluded.base_url, api_key=excluded.api_key`, [p.name, p.baseUrl, p.apiKey ?? ""]);
   }
 
+  /** UpdateProvider edits a provider, optionally renaming it and its role references. */
+  updateProvider(
+    oldName: string,
+    next: { name: string; baseUrl: string; apiKey?: string },
+  ): Provider {
+    const current = this.db
+      .query(`SELECT name, base_url, api_key FROM providers WHERE name=?`)
+      .get(oldName) as { name: string; base_url: string; api_key: string } | null;
+    if (!current) throw new NotFoundError(`provider "${oldName}" not found`);
+    if (next.name !== oldName) {
+      const collision = this.db.query(`SELECT 1 FROM providers WHERE name=?`).get(next.name);
+      if (collision) throw new ConflictError(`provider "${next.name}" already exists`);
+    }
+    const apiKey = next.apiKey === undefined ? current.api_key : next.apiKey;
+    this.db.transaction(() => {
+      if (next.name !== oldName) {
+        this.db.run(
+          `INSERT INTO providers(name, base_url, api_key) VALUES(?,?,?)`,
+          [next.name, next.baseUrl, apiKey],
+        );
+        this.db.run(`UPDATE roles SET provider=? WHERE provider=?`, [next.name, oldName]);
+        this.db.run(`DELETE FROM providers WHERE name=?`, [oldName]);
+      } else {
+        this.db.run(
+          `UPDATE providers SET base_url=?, api_key=? WHERE name=?`,
+          [next.baseUrl, apiKey, oldName],
+        );
+      }
+    })();
+    return { name: next.name, baseUrl: next.baseUrl, apiKey: apiKey || undefined };
+  }
+
+  /** RolesUsingProvider lists roles that route to a provider. */
+  rolesUsingProvider(name: string): string[] {
+    const rows = this.db
+      .query(`SELECT role FROM roles WHERE provider=? ORDER BY role`)
+      .all(name) as { role: string }[];
+    return rows.map((row) => row.role);
+  }
+
+  /** DeleteProvider removes a provider unless a role still routes to it. */
+  deleteProvider(name: string): void {
+    const roles = this.rolesUsingProvider(name);
+    if (roles.length > 0) {
+      throw new ConflictError(`provider "${name}" is used by role(s): ${roles.join(", ")}`);
+    }
+    const res = this.db.run(`DELETE FROM providers WHERE name=?`, [name]);
+    if (res.changes === 0) throw new NotFoundError(`provider "${name}" not found`);
+  }
+
   /** Role returns the routing for a role. */
   role(role: string): Role {
     const r = this.db
@@ -325,7 +371,7 @@ export class Store {
     const now = Math.floor(Date.now() / 1000);
     this.db.run(
       `INSERT INTO sessions(id, project_id, name, created_at, updated_at) VALUES(?,?,?,?,?)`, [id, projectId, name, now, now]);
-    return { id, projectId, name, goal: "", promptTokens: 0, completionTokens: 0, updatedAt: new Date(now * 1000) };
+    return { id, projectId, name, goal: "", ctxTokens: 0, think: "auto", updatedAt: new Date(now * 1000) };
   }
 
   /** Sessions lists sessions, newest first, optionally filtered by project. */
@@ -351,18 +397,18 @@ export class Store {
   session(id: string): Session {
     const r = this.db
       .query(
-        `SELECT id, project_id, name, goal, prompt_tokens, completion_tokens, updated_at
+        `SELECT id, project_id, name, goal, ctx_tokens, think, updated_at
          FROM sessions WHERE id=?`,
       )
-      .get(id) as { id: string; project_id: number; name: string; goal: string; prompt_tokens: number; completion_tokens: number; updated_at: number } | null;
+      .get(id) as { id: string; project_id: number; name: string; goal: string; ctx_tokens: number; think: string; updated_at: number } | null;
     if (!r) throw new NotFoundError(`session "${id}" not found`);
     return {
       id: r.id,
       projectId: r.project_id,
       name: r.name,
       goal: r.goal,
-      promptTokens: r.prompt_tokens,
-      completionTokens: r.completion_tokens,
+      ctxTokens: r.ctx_tokens,
+      think: r.think as ThinkLevel,
       updatedAt: new Date(r.updated_at * 1000),
     };
   }
@@ -443,7 +489,7 @@ export class Store {
     this.db.run(
       `INSERT INTO sessions(id, project_id, name, kind, parent, created_at, updated_at) VALUES(?,?,?,?,?,?,?)`,
       [id, pid, name, "btw", parentID, now, now]);
-    return { id, projectId: pid, name, goal: "", promptTokens: 0, completionTokens: 0, updatedAt: new Date(now * 1000) };
+    return { id, projectId: pid, name, goal: "", ctxTokens: 0, think: "auto", updatedAt: new Date(now * 1000) };
   }
 
   /** BtwSides lists retained sides of a parent session, newest first. */
@@ -483,10 +529,15 @@ export class Store {
     this.db.run(`UPDATE sessions SET goal=? WHERE id=?`, [goal, id]);
   }
 
-  /** AddUsage accumulates token usage. */
-  addUsage(sessionID: string, prompt: number, completion: number): void {
+  /** SetSessionThink stores the session's reasoning level. */
+  setSessionThink(id: string, think: ThinkLevel): void {
+    this.db.run(`UPDATE sessions SET think=? WHERE id=?`, [think, id]);
+  }
+
+  /** SetContextTokens records the current context size of the session. */
+  setContextTokens(sessionID: string, tokens: number): void {
     this.db.run(
-      `UPDATE sessions SET prompt_tokens=prompt_tokens+?, completion_tokens=completion_tokens+?, updated_at=? WHERE id=?`, [prompt, completion, Math.floor(Date.now() / 1000), sessionID]);
+      `UPDATE sessions SET ctx_tokens=?, updated_at=? WHERE id=?`, [Math.max(0, tokens), Math.floor(Date.now() / 1000), sessionID]);
   }
 
   // ---- queue ----

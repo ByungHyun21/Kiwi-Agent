@@ -36,8 +36,14 @@ class ScriptedLLM implements Client {
   async complete(): Promise<string> {
     return "요약";
   }
+  async listModelInfo(): Promise<{ id: string; contextLength?: number }[]> {
+    return [];
+  }
   async listModels(): Promise<string[]> {
     return [];
+  }
+  async modelContextLength(): Promise<number> {
+    return 0;
   }
 }
 

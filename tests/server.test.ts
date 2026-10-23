@@ -38,7 +38,7 @@ const runner: Runner = {
 };
 
 /** start boots a real kiwi-server (store + stub LLM + fake runner) on port 0. */
-async function start(opts: { webDist?: string; auth?: boolean } = {}) {
+async function start(opts: { webDist?: string } = {}) {
   const dir = mkdtempSync(path.join(os.tmpdir(), "kiwi-server-test-"));
   const dist = path.join(dir, "dist");
   mkdirSync(dist, { recursive: true });
@@ -50,6 +50,10 @@ async function start(opts: { webDist?: string; auth?: boolean } = {}) {
   const llm = Bun.serve({
     port: 0,
     async fetch(req) {
+      const url = new URL(req.url);
+      if (req.method === "GET" && url.pathname === "/models") {
+        return Response.json({ data: [{ id: "stub", context_length: 32768 }] });
+      }
       const body = (await req.json()) as { stream?: boolean };
       if (!body.stream) return Response.json({ choices: [{ message: { content: "summary" } }] });
       const chunks = [
@@ -66,7 +70,7 @@ async function start(opts: { webDist?: string; auth?: boolean } = {}) {
   const srv = new KiwiServer(store, runner, {
     addr: ":0",
     dataDir: dir,
-    authRequired: opts.auth ?? false,
+    searxngUrl: "",
     webDist: opts.webDist ?? dist,
   });
   const server = Bun.serve({
@@ -156,7 +160,7 @@ afterAll(() => {
   for (const c of cleanups) c();
 });
 
-async function open(opts: { webDist?: string; auth?: boolean } = {}): Promise<{ ctx: Awaited<ReturnType<typeof start>>; ws: WSClient }> {
+async function open(opts: { webDist?: string } = {}): Promise<{ ctx: Awaited<ReturnType<typeof start>>; ws: WSClient }> {
   const ctx = await start(opts);
   const ws = await WSClient.connect(ctx.wsURL);
   cleanups.push(() => {
@@ -183,12 +187,12 @@ describe("websocket", () => {
     ws.send({ type: MsgSend, text: "안녕" });
     await ws.next((e) => e.type === EvStatus && e.name === "working");
     await ws.next((e) => e.type === EvDelta && e.text === "안녕하세요");
-    await ws.next((e) => e.type === EvState && e.state?.ctxUsed === 7);
+    await ws.next((e) => e.type === EvState && e.state?.ctxUsed === 7 && e.state?.ctxMax === 32768);
     await ws.next((e) => e.type === EvDone);
     await ws.next((e) => e.type === EvStatus && e.name === "idle");
 
     expect(ctx.store.messages(session).map((m) => m.role)).toEqual(["user", "assistant"]);
-    expect(ctx.store.session(session).promptTokens).toBe(5);
+    expect(ctx.store.session(session).ctxTokens).toBe(7);
   });
 
   test("send without a session is rejected", async () => {
@@ -249,14 +253,6 @@ describe("http routing", () => {
     expect(machines.map((m) => m.name)).toEqual(["m"]);
     const projects = (await (await fetch(ctx.url + "/api/projects")).json()) as { name: string }[];
     expect(projects.map((p) => p.name)).toEqual(["p"]);
-  });
-
-  test("auth guard rejects a missing token when enabled", async () => {
-    const ctx = await start({ auth: true });
-    cleanups.push(() => ctx.close());
-    expect((await fetch(ctx.url + "/api/machines")).status).toBe(401);
-    const ok = await fetch(ctx.url + "/api/machines", { headers: { Authorization: "Bearer " + ctx.srv.token } });
-    expect(ok.status).toBe(200);
   });
 
   test("serves the SPA with history fallback", async () => {

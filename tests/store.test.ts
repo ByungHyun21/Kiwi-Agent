@@ -1,4 +1,4 @@
-// Store tests: machines, projects, sessions, messages, queue, token.
+// Store tests: machines, projects, sessions, messages, queue.
 
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -23,13 +23,6 @@ afterAll(() => {
 });
 
 describe("Store", () => {
-  test("token is stable across reopens", () => {
-    const t1 = store.token();
-    expect(t1).toMatch(/^[a-f0-9]{48}$/);
-    const t2 = Store.open(path.join(dir, "server.db")).token();
-    expect(t2).toBe(t1);
-  });
-
   test("machine CRUD", () => {
     store.saveMachine({ name: "box1", host: "h", port: 22, user: "u", state: "" });
     const m = store.machine("box1");
@@ -54,6 +47,9 @@ describe("Store", () => {
     expect(sess.name).toBe("session " + sess.id);
     store.setGoal(sess.id, "테스트 목표");
     expect(store.session(sess.id).goal).toBe("테스트 목표");
+    expect(store.session(sess.id).think).toBe("auto");
+    store.setSessionThink(sess.id, "max");
+    expect(store.session(sess.id).think).toBe("max");
 
     store.appendMessage(sess.id, { role: "user", content: "안녕" });
     store.appendMessage(sess.id, {
@@ -68,10 +64,9 @@ describe("Store", () => {
     expect(msgs[1]!.toolCalls![0]!.name).toBe("write_file");
     expect(msgs[2]!.toolCallID).toBe("c1");
 
-    store.addUsage(sess.id, 10, 5);
+    store.setContextTokens(sess.id, 15);
     const reloaded = store.session(sess.id);
-    expect(reloaded.promptTokens).toBe(10);
-    expect(reloaded.completionTokens).toBe(5);
+    expect(reloaded.ctxTokens).toBe(15);
 
     // compact via replaceMessages
     store.replaceMessages(sess.id, [{ role: "user", content: "[요약]" }]);

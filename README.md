@@ -17,7 +17,7 @@ on the machines where your code lives, relayed by the server over SSH.
 └────────────┘        │ · model routing  │        └─────────────────┘
                       └──────┬───────────┘
                              ▼
-                      searxng (sidecar, agent web search)
+                      searxng (optional, agent web search)
 ```
 
 ## Why this shape
@@ -30,38 +30,59 @@ on the machines where your code lives, relayed by the server over SSH.
   (`kiwi exec`), not by pasting shell snippets together.
 - **Bring your own models.** llama.cpp, Ollama, OpenAI-compatible — wire
   providers per role (chat, OCR, embeddings) and swap them in the web UI.
-- **Web search without API keys.** A bundled SearXNG sidecar gives the agent
-  private, key-free web search on your network.
+- **Web search without API keys.** Point `SEARXNG_URL` at a SearXNG instance
+  on your network to give the agent key-free web search.
 
-## Run
+## Install (local)
 
-Docker (recommended):
+Requires [Bun](https://bun.sh) and key-based SSH access to the work machines.
 
 ```sh
 git clone https://github.com/ByungHyun21/Kiwi-Agent && cd Kiwi-Agent
-docker compose up -d --build
+bun install
+cd web && bun install && bun run build && cd ..
+
+# optional: compile kiwi / kiwi-server binaries
+bun run build
+
+# start the server (foreground)
+bun run src/kiwi-server.ts --addr 0.0.0.0:6002
 # open http://<server-ip>:6002
 ```
 
-- Web app and API on `0.0.0.0:6002`; SearXNG on `8888` (host-local).
-- Sessions, projects and settings persist in `~/.local/share/kiwi` (SQLite).
-- The server is unauthenticated by default (`KIWI_AUTH=off`) — intended for
-  a trusted home LAN. Set `KIWI_AUTH=on` in `docker-compose.yml` to require
-  the access token (printed once in the server logs).
+- Web app and API listen on `0.0.0.0:6002` (default `:5494` when `--addr`
+  is omitted). Set `KIWI_ADDR` for a different default.
+- Sessions, projects, settings and SSH host-key pins persist in
+  `~/.local/share/kiwi` (SQLite).
+- The server has no authentication — intended for a trusted home LAN. Do not
+  expose the port to the internet.
+- Web search is optional: open 관리 → 검색엔진 and enter a SearXNG JSON API
+  base (for example `http://127.0.0.1:8888`). `SEARXNG_URL` remains a fallback
+  for headless setups. Need a local instance? Run `option/searxng` with
+  `docker compose up -d` (the main server itself stays Docker-free).
+- The SPA is served from `web/dist`; run `cd web && bun run dev` for Vite
+  development with `/api` and `/ws` proxying.
 
-Source (dev):
+### Run as a user service
 
 ```sh
-bun install
-cd web && bun install && bun run build && cd ..
-bun run src/kiwi-server.ts        # serves web/dist + API (default :5494)
-bun test
+mkdir -p ~/.config/systemd/user
+cat > ~/.config/systemd/user/kiwi-server.service <<EOF
+[Unit]
+Description=Kiwi Agent server
 
-cd web && bun run dev             # or the Vite dev server, proxying /api and /ws
+[Service]
+WorkingDirectory=$HOME/Kiwi-Agent
+Environment=KIWI_WEB_DIST=$HOME/Kiwi-Agent/web/dist
+ExecStart=$(command -v bun) run src/kiwi-server.ts --addr 0.0.0.0:6002
+Restart=on-failure
+
+[Install]
+WantedBy=default.target
+EOF
+systemctl --user daemon-reload
+systemctl --user enable --now kiwi-server
 ```
-
-`KIWI_ADDR` sets the listen address (default `:5494`). Without a `web/dist`
-build the UI answers with a build hint — run the build above or use Vite.
 
 ## Code layout
 
@@ -69,6 +90,7 @@ build the UI answers with a build hint — run the build above or use Vite.
 - `src/server/` — HTTP/WS surface (`server.ts`, `ws.ts`, `session.ts`), agent loop and tools (`agent/`), SQLite store, SSH runner
 - `src/exec/` — the `kiwi` binary: `kiwi exec` subcommands, LSP broker, self-updater
 - `web/` — Vite + React SPA (the only client)
+- `option/searxng/` — optional SearXNG compose file for local web search
 
 ## Work machines (`kiwi exec`)
 
@@ -90,6 +112,11 @@ Then:
    with `BatchMode=yes` and cannot answer password prompts).
 2. Register the machine in the web app's admin panel (관리 → 기기) or with
    `POST /api/machines`; create a project with `POST /api/projects`.
+3. The server pins the machine's SSH host key on first connection (ed25519
+   preferred) in `~/.local/share/kiwi/known_hosts.d/` and stores the SHA256
+   fingerprint. Later key changes are rejected. The admin panel shows the
+   fingerprint and can verify or force a re-pin
+   (`POST /api/machines/<name>/pin`, `{"force":true}`).
 
 ### Updating
 
@@ -108,10 +135,9 @@ curl -X POST http://<server-ip>:6002/api/machines/<name>/update
 ```
 
 `status` is `updated` or `current` (already newest); failures come back as
-`{"ok":false,"code":…,"message":…}`. Add
-`-H "Authorization: Bearer $TOKEN"` when `KIWI_AUTH=on`. A machine whose kiwi
-predates this subcommand answers `unknown command: update` — run
-`kiwi update` on it once over SSH.
+`{"ok":false,"code":…,"message":…}`. A machine whose kiwi predates this
+subcommand answers `unknown command: update` — run `kiwi update` on it once
+over SSH.
 
 ## License
 
@@ -119,4 +145,4 @@ This project is MIT.
 
 - [D2 Coding](https://github.com/naver/d2-coding-font) — SIL OFL 1.1, bundled as the UI font
 - [SQLite](https://www.sqlite.org/) — public domain, embedded storage engine
-- [SearXNG](https://github.com/searxng/searxng) — AGPL 3.0, bundled sidecar for agent web search
+- [SearXNG](https://github.com/searxng/searxng) — AGPL 3.0, optional external web search backend
